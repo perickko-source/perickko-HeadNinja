@@ -114,6 +114,45 @@ const HEAD_SIZE = 80;
 const IMG_SIZE = 200;
 const MIN_SWIPE = 15;
 
+// === SISTEMA DE SONIDO CON WEB AUDIO API ===
+let audioCtx = null;
+let sliceBuffer = null;
+
+function initAudio() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  // Intentar cargar ogg primero, si falla mp3
+  loadSound('chaf.ogg', () => {
+    // fallback si ogg falla
+    loadSound('chaf.mp3', () => {});
+  });
+}
+
+function loadSound(url, fallback) {
+  fetch(url)
+    .then(res => {
+      if (!res.ok) throw new Error('not found');
+      return res.arrayBuffer();
+    })
+    .then(data => audioCtx.decodeAudioData(data))
+    .then(buffer => {
+      sliceBuffer = buffer;
+    })
+    .catch(() => {
+      if (fallback) fallback();
+    });
+}
+
+function playSlice() {
+  if (!audioCtx || !sliceBuffer) return;
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+  const source = audioCtx.createBufferSource();
+  source.buffer = sliceBuffer;
+  source.connect(audioCtx.destination);
+  source.start(0);
+}
+
 function lockLandscape() {
   if (screen.orientation && screen.orientation.lock) {
     screen.orientation.lock('landscape').catch(() => {});
@@ -121,6 +160,9 @@ function lockLandscape() {
 }
 
 document.getElementById('fullscreenBtn').addEventListener('click', () => {
+  // Inicializar audio con la interacción del usuario
+  initAudio();
+
   const el = document.documentElement;
   const fs = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
   if (fs) {
@@ -158,13 +200,6 @@ window.addEventListener('orientationchange', () => {
   }, 300);
 });
 
-const sliceSound = new Audio('chaf.ogg');
-
-function playSlice() {
-  const s = sliceSound.cloneNode();
-  s.play();
-}
-
 const FACES = ['😄','😠','😱','🤪','😎','😈'];
 const IMAGES = [];
 const imgSrcs = [
@@ -172,7 +207,7 @@ const imgSrcs = [
   'revestido1.png', 'revestido2.png',
   'jordi1.png', 'jordi2.png', 'jordi3.png',
   'lopez1.png', 'lopez2.png', 'lopez3.png',
-  'garcia1.png', 'garcia2.png', 'garcia3.png'
+  'garcia1.png', 'garcia2.png', 'garcia3.png', 'garcia4.png'
 ];
 
 imgSrcs.forEach(src => {
