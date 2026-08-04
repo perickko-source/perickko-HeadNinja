@@ -111,18 +111,16 @@ let heads = [], particles = [], halves = [], trail = [];
 let score = 0, lives = 3, gameOver = false, spawnTimer = 0, difficulty = 1;
 const GRAVITY = 0.22;
 const HEAD_SIZE = 80;
-const IMG_SIZE = 200;
+const IMG_HEIGHT = 150;
 const MIN_SWIPE = 15;
 
-// === SISTEMA DE SONIDO CON WEB AUDIO API ===
+// === SONIDO ===
 let audioCtx = null;
 let sliceBuffer = null;
 
 function initAudio() {
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  // Intentar cargar ogg primero, si falla mp3
   loadSound('chaf.ogg', () => {
-    // fallback si ogg falla
     loadSound('chaf.mp3', () => {});
   });
 }
@@ -134,19 +132,13 @@ function loadSound(url, fallback) {
       return res.arrayBuffer();
     })
     .then(data => audioCtx.decodeAudioData(data))
-    .then(buffer => {
-      sliceBuffer = buffer;
-    })
-    .catch(() => {
-      if (fallback) fallback();
-    });
+    .then(buffer => { sliceBuffer = buffer; })
+    .catch(() => { if (fallback) fallback(); });
 }
 
 function playSlice() {
   if (!audioCtx || !sliceBuffer) return;
-  if (audioCtx.state === 'suspended') {
-    audioCtx.resume();
-  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
   const source = audioCtx.createBufferSource();
   source.buffer = sliceBuffer;
   source.connect(audioCtx.destination);
@@ -160,22 +152,14 @@ function lockLandscape() {
 }
 
 document.getElementById('fullscreenBtn').addEventListener('click', () => {
-  // Inicializar audio con la interacción del usuario
   initAudio();
-
   const el = document.documentElement;
   const fs = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
   if (fs) {
-    fs.call(el).then(() => {
-      lockLandscape();
-      startGame();
-    }).catch(() => {
-      lockLandscape();
-      startGame();
-    });
+    fs.call(el).then(() => { lockLandscape(); startGame(); })
+      .catch(() => { lockLandscape(); startGame(); });
   } else {
-    lockLandscape();
-    startGame();
+    lockLandscape(); startGame();
   }
 });
 
@@ -192,7 +176,6 @@ window.addEventListener('resize', () => {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
 });
-
 window.addEventListener('orientationchange', () => {
   setTimeout(() => {
     canvas.width = window.innerWidth;
@@ -215,13 +198,8 @@ imgSrcs.forEach(src => {
   img.src = src;
   img.onload = function() {
     const aspect = this.naturalWidth / this.naturalHeight;
-    if (aspect >= 1) {
-      img.drawW = IMG_SIZE;
-      img.drawH = IMG_SIZE / aspect;
-    } else {
-      img.drawH = IMG_SIZE;
-      img.drawW = IMG_SIZE * aspect;
-    }
+    img.drawH = IMG_HEIGHT;
+    img.drawW = IMG_HEIGHT * aspect;
   };
   IMAGES.push(img);
 });
@@ -244,7 +222,7 @@ class Head {
     const dist = (canvas.height + 40) - targetY;
     this.vy = -Math.sqrt(2 * GRAVITY * dist);
     this.face = randomFace();
-    this.size = this.face.type === 'image' ? IMG_SIZE : HEAD_SIZE;
+    this.size = this.face.type === 'image' ? IMG_HEIGHT : HEAD_SIZE;
     this.rot = 0;
     this.rs = (Math.random() - 0.5) * 0.08;
   }
@@ -272,8 +250,8 @@ class Head {
       ctx.fillText(this.face.value, 0, 0);
     } else {
       const img = this.face.value;
-      const w = img.drawW || IMG_SIZE;
-      const h = img.drawH || IMG_SIZE;
+      const w = img.drawW || IMG_HEIGHT;
+      const h = img.drawH || IMG_HEIGHT;
       ctx.drawImage(img, -w/2, -h/2, w, h);
     }
     ctx.restore();
@@ -286,7 +264,7 @@ class Half {
     this.vx = dir * (Math.random() * 2 + 2);
     this.vy = -2;
     this.face = face;
-    this.size = face.type === 'image' ? IMG_SIZE : HEAD_SIZE;
+    this.size = face.type === 'image' ? IMG_HEIGHT : HEAD_SIZE;
     this.rot = 0;
     this.rs = dir * 0.1;
     this.life = 40;
@@ -300,8 +278,8 @@ class Half {
   }
   draw() {
     const img = this.face.type === 'image' ? this.face.value : null;
-    const w = img ? (img.drawW || IMG_SIZE) : HEAD_SIZE;
-    const h = img ? (img.drawH || IMG_SIZE) : HEAD_SIZE;
+    const w = img ? (img.drawW || IMG_HEIGHT) : HEAD_SIZE;
+    const h = img ? (img.drawH || IMG_HEIGHT) : HEAD_SIZE;
     const halfH = h / 2;
 
     ctx.save();
@@ -449,7 +427,6 @@ document.getElementById('gameover').addEventListener('touchend', e => {
   e.preventDefault();
   if (gameOver) reset();
 });
-
 document.addEventListener('keydown', e => {
   if (e.code === 'Space' && gameOver) reset();
 });
