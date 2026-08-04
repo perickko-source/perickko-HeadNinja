@@ -49,7 +49,6 @@
     transform: scale(1.1);
   }
 
-  /* Overlay para forzar rotación */
   #rotateScreen {
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
     background: #1a1a2e;
@@ -72,7 +71,6 @@
     50% { transform: rotate(90deg); }
   }
 
-  /* Mostrar overlay de rotación solo en portrait */
   @media screen and (orientation: portrait) {
     #rotateScreen { display: flex; }
     #startScreen, canvas, #ui, #gameover { display: none !important; }
@@ -101,7 +99,7 @@
   <div>💀 <span id="score">0</span></div>
   <div>❤️ <span id="lives">3</span></div>
 </div>
-<div id="gameover">GAME OVER<span>ESPACIO para reiniciar</span></div>
+<div id="gameover">GAME OVER<span>Pulsa para jugar otra vez</span></div>
 <canvas id="c"></canvas>
 
 <script>
@@ -116,14 +114,12 @@ const HEAD_SIZE = 80;
 const IMG_SIZE = 200;
 const MIN_SWIPE = 15;
 
-// Intentar bloquear orientación landscape
 function lockLandscape() {
   if (screen.orientation && screen.orientation.lock) {
     screen.orientation.lock('landscape').catch(() => {});
   }
 }
 
-// Botón pantalla completa
 document.getElementById('fullscreenBtn').addEventListener('click', () => {
   const el = document.documentElement;
   const fs = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
@@ -155,7 +151,6 @@ window.addEventListener('resize', () => {
   canvas.height = window.innerHeight;
 });
 
-// Detectar cambio de orientación
 window.addEventListener('orientationchange', () => {
   setTimeout(() => {
     canvas.width = window.innerWidth;
@@ -176,7 +171,8 @@ const imgSrcs = [
   'manuel1.png', 'manuel2.png',
   'revestido1.png', 'revestido2.png',
   'jordi1.png', 'jordi2.png', 'jordi3.png',
-  'lopez1.png', 'lopez2.png', 'lopez3.png'
+  'lopez1.png', 'lopez2.png', 'lopez3.png',
+  'garcia1.png'
 ];
 
 imgSrcs.forEach(src => {
@@ -410,8 +406,12 @@ canvas.addEventListener('touchend', e => {
   prevMouse = null;
 }, { passive: false });
 
-// Reiniciar en móvil: tap en game over
+// Reiniciar
 document.getElementById('gameover').addEventListener('click', () => {
+  if (gameOver) reset();
+});
+document.getElementById('gameover').addEventListener('touchend', e => {
+  e.preventDefault();
   if (gameOver) reset();
 });
 
