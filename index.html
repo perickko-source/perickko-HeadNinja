@@ -15,6 +15,20 @@
     font-size: 24px; text-shadow: 2px 2px 4px #000;
     display: flex; gap: 40px;
   }
+  #ui2p {
+    position: absolute; top: 15px; left: 0; width: 100%;
+    display: none;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 30px;
+    font-family: 'Arial Black', sans-serif;
+    font-size: 22px;
+    color: #fff;
+    text-shadow: 2px 2px 4px #000;
+  }
+  #ui2p .p1 { color: #4fc3f7; }
+  #ui2p .p2 { color: #ff8a65; }
+  #ui2p .timer { color: #fff; font-size: 28px; }
   #gameover {
     position: absolute; top: 50%; left: 50%;
     transform: translate(-50%,-50%);
@@ -23,6 +37,7 @@
     display: none; text-align: center;
   }
   #gameover span { font-size: 20px; color: #fff; display: block; margin-top: 15px; }
+  #gameover .winner { font-size: 28px; color: #ffd700; margin-top: 10px; }
   #startScreen {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     background: #1a1a2e;
@@ -32,22 +47,21 @@
   }
   #startScreen h1 {
     color: #fff; font-family: 'Arial Black', sans-serif;
-    font-size: 42px; margin-bottom: 40px;
+    font-size: 42px; margin-bottom: 30px;
     text-shadow: 2px 2px 8px #000;
     text-align: center;
   }
-  #fullscreenBtn {
-    padding: 20px 40px;
-    font-size: 22px; font-family: 'Arial Black', sans-serif;
+  .menuBtn {
+    padding: 18px 36px;
+    font-size: 20px; font-family: 'Arial Black', sans-serif;
     background: #e63946; color: #fff;
     border: none; border-radius: 12px;
-    cursor: pointer;
+    cursor: pointer; margin: 8px;
     transition: transform 0.2s, background 0.2s;
   }
-  #fullscreenBtn:hover {
-    background: #ff4d5a;
-    transform: scale(1.1);
-  }
+  .menuBtn:hover { background: #ff4d5a; transform: scale(1.05); }
+  .menuBtn.blue { background: #1565c0; }
+  .menuBtn.blue:hover { background: #1e88e5; }
 
   #rotateScreen {
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -73,7 +87,7 @@
 
   @media screen and (orientation: portrait) {
     #rotateScreen { display: flex; }
-    #startScreen, canvas, #ui, #gameover { display: none !important; }
+    #startScreen, canvas, #ui, #ui2p, #gameover { display: none !important; }
   }
   @media screen and (orientation: landscape) {
     #rotateScreen { display: none; }
@@ -92,14 +106,22 @@
 
 <div id="startScreen">
   <h1>💀 HEAD NINJA 💀</h1>
-  <button id="fullscreenBtn">🖥️ PANTALLA COMPLETA</button>
+  <button class="menuBtn" id="btn1p">🎮 1 JUGADOR</button>
+  <button class="menuBtn blue" id="btn2p">⚔️ 2 JUGADORES</button>
 </div>
 
 <div id="ui">
   <div>💀 <span id="score">0</span></div>
   <div>❤️ <span id="lives">3</span></div>
 </div>
-<div id="gameover">GAME OVER<span>Pulsa para jugar otra vez</span></div>
+
+<div id="ui2p">
+  <div class="p1">🔵 P1: <span id="score1">0</span></div>
+  <div class="timer">⏱️ <span id="timer">60</span></div>
+  <div class="p2">🟠 P2: <span id="score2">0</span></div>
+</div>
+
+<div id="gameover">GAME OVER<span id="goText">Pulsa para jugar otra vez</span><div class="winner" id="winnerText"></div></div>
 <canvas id="c"></canvas>
 
 <script>
@@ -107,6 +129,7 @@ const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 
 let gameStarted = false;
+let gameMode = 1; // 1 o 2 jugadores
 let heads = [], particles = [], halves = [], trail = [], stains = [];
 let score = 0, lives = 3, gameOver = false, spawnTimer = 0, difficulty = 1;
 let shakeTimer = 0, shakeIntensity = 0;
@@ -116,62 +139,94 @@ const IMG_HEIGHT = 150;
 const MIN_SWIPE = 15;
 const BLOOD_COLORS = ['#880000', '#ff0000', '#cc0000'];
 
+// 2P
+let score1 = 0, score2 = 0;
+let timeLeft = 60;
+let timerInterval = null;
+let activeTouches = {}; // touchId -> { player, prevX, prevY }
+let playerAssign = [false, false]; // [p1activo, p2activo]
+
 // === SONIDO ===
-let audioCtx = null;
-let sliceBuffer = null;
+let audioCtx = null, sliceBuffer = null;
 
 function initAudio() {
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  loadSound('chaf.ogg', () => {
-    loadSound('chaf.mp3', () => {});
-  });
+  loadSound('chaf.ogg', () => { loadSound('chaf.mp3', () => {}); });
 }
-
 function loadSound(url, fallback) {
-  fetch(url)
-    .then(res => {
-      if (!res.ok) throw new Error('not found');
-      return res.arrayBuffer();
-    })
-    .then(data => audioCtx.decodeAudioData(data))
-    .then(buffer => { sliceBuffer = buffer; })
+  fetch(url).then(r => { if (!r.ok) throw new Error(); return r.arrayBuffer(); })
+    .then(d => audioCtx.decodeAudioData(d))
+    .then(b => { sliceBuffer = b; })
     .catch(() => { if (fallback) fallback(); });
 }
-
 function playSlice() {
   if (!audioCtx || !sliceBuffer) return;
   if (audioCtx.state === 'suspended') audioCtx.resume();
-  const source = audioCtx.createBufferSource();
-  source.buffer = sliceBuffer;
-  source.connect(audioCtx.destination);
-  source.start(0);
+  const s = audioCtx.createBufferSource();
+  s.buffer = sliceBuffer; s.connect(audioCtx.destination); s.start(0);
 }
 
 function lockLandscape() {
-  if (screen.orientation && screen.orientation.lock) {
+  if (screen.orientation && screen.orientation.lock)
     screen.orientation.lock('landscape').catch(() => {});
-  }
 }
 
-document.getElementById('fullscreenBtn').addEventListener('click', () => {
-  initAudio();
+function goFullscreen(cb) {
   const el = document.documentElement;
   const fs = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
-  if (fs) {
-    fs.call(el).then(() => { lockLandscape(); startGame(); })
-      .catch(() => { lockLandscape(); startGame(); });
-  } else {
-    lockLandscape(); startGame();
-  }
+  if (fs) fs.call(el).then(cb).catch(cb);
+  else cb();
+}
+
+document.getElementById('btn1p').addEventListener('click', () => {
+  initAudio();
+  goFullscreen(() => { lockLandscape(); startGame(1); });
+});
+document.getElementById('btn2p').addEventListener('click', () => {
+  initAudio();
+  goFullscreen(() => { lockLandscape(); startGame(2); });
 });
 
-function startGame() {
+function startGame(mode) {
+  gameMode = mode;
   document.getElementById('startScreen').style.display = 'none';
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
   gameStarted = true;
+  gameOver = false;
+  heads = []; particles = []; halves = []; trail = []; stains = [];
+  score = 0; lives = 3; difficulty = 1; spawnTimer = 0;
+  score1 = 0; score2 = 0; timeLeft = 60;
+  activeTouches = {}; playerAssign = [false, false];
+  prevMouse = null;
+
+  if (mode === 1) {
+    document.getElementById('ui').style.display = 'flex';
+    document.getElementById('ui2p').style.display = 'none';
+  } else {
+    document.getElementById('ui').style.display = 'none';
+    document.getElementById('ui2p').style.display = 'flex';
+    timerInterval = setInterval(() => {
+      timeLeft--;
+      document.getElementById('timer').textContent = timeLeft;
+      if (timeLeft <= 0) endGame2P();
+    }, 1000);
+  }
+  document.getElementById('gameover').style.display = 'none';
   updateUI();
   loop();
+}
+
+function endGame2P() {
+  clearInterval(timerInterval);
+  gameOver = true;
+  let winText = '';
+  if (score1 > score2) winText = '🔵 ¡JUGADOR 1 GANA!';
+  else if (score2 > score1) winText = '🟠 ¡JUGADOR 2 GANA!';
+  else winText = '🤝 ¡EMPATE!';
+  document.getElementById('winnerText').textContent = winText;
+  document.getElementById('goText').textContent = 'Pulsa para jugar otra vez';
+  document.getElementById('gameover').style.display = 'block';
 }
 
 window.addEventListener('resize', () => {
@@ -179,31 +234,24 @@ window.addEventListener('resize', () => {
   canvas.height = window.innerHeight;
 });
 window.addEventListener('orientationchange', () => {
-  setTimeout(() => {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-  }, 300);
+  setTimeout(() => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }, 300);
 });
 
 const FACES = ['😄','😠','😱','🤪','😎','😈'];
 const IMAGES = [];
 const imgSrcs = [
-  'manuel1.png', 'manuel2.png',
-  'revestido1.png', 'revestido2.png',
-  'jordi1.png', 'jordi2.png', 'jordi3.png',
-  'lopez1.png', 'lopez2.png', 'lopez3.png',
-  'garcia1.png', 'garcia2.png', 'garcia3.png', 'garcia4.png',
-  'buryua1.png', 'buryua2.png', 'buryua3.png',
-  'cipres1.png', 'cipres2.png', 'cipres3.png'
+  'manuel1.png','manuel2.png','revestido1.png','revestido2.png',
+  'jordi1.png','jordi2.png','jordi3.png',
+  'lopez1.png','lopez2.png','lopez3.png',
+  'garcia1.png','garcia2.png','garcia3.png','garcia4.png',
+  'buryua1.png','buryua2.png','buryua3.png',
+  'cipres1.png','cipres2.png','cipres3.png'
 ];
-
 imgSrcs.forEach(src => {
-  const img = new Image();
-  img.src = src;
+  const img = new Image(); img.src = src;
   img.onload = function() {
     const aspect = this.naturalWidth / this.naturalHeight;
-    img.drawH = IMG_HEIGHT;
-    img.drawW = IMG_HEIGHT * aspect;
+    img.drawH = IMG_HEIGHT; img.drawW = IMG_HEIGHT * aspect;
   };
   IMAGES.push(img);
 });
@@ -211,342 +259,230 @@ imgSrcs.forEach(src => {
 function randomFace() {
   const total = FACES.length + IMAGES.length;
   const idx = Math.floor(Math.random() * total);
-  if (idx < FACES.length) return { type: 'emoji', value: FACES[idx] };
-  return { type: 'image', value: IMAGES[idx - FACES.length] };
+  if (idx < FACES.length) return { type:'emoji', value:FACES[idx] };
+  return { type:'image', value:IMAGES[idx - FACES.length] };
 }
 
 let prevMouse = null;
 
-// === MANCHA: más grande, más dispersa, desaparece antes ===
 class Stain {
-  constructor(x, y) {
-    this.x = x;
-    this.y = y;
-    this.radius = 25 + Math.random() * 35;
-    this.life = 45;
-    this.maxLife = 45;
-    this.color = BLOOD_COLORS[Math.floor(Math.random() * BLOOD_COLORS.length)];
-    this.blobs = [];
-    const numBlobs = 4 + Math.floor(Math.random() * 4);
-    for (let i = 0; i < numBlobs; i++) {
-      this.blobs.push({
-        ox: (Math.random() - 0.5) * this.radius * 1.8,
-        oy: (Math.random() - 0.5) * this.radius * 1.8,
-        r: this.radius * (0.3 + Math.random() * 0.6)
-      });
-    }
+  constructor(x,y){ this.x=x; this.y=y; this.radius=25+Math.random()*35; this.life=45; this.maxLife=45;
+    this.color=BLOOD_COLORS[Math.floor(Math.random()*3)]; this.blobs=[];
+    const n=4+Math.floor(Math.random()*4);
+    for(let i=0;i<n;i++) this.blobs.push({ox:(Math.random()-.5)*this.radius*1.8,oy:(Math.random()-.5)*this.radius*1.8,r:this.radius*(.3+Math.random()*.6)});
   }
-  update() {
-    return --this.life > 0;
-  }
-  draw() {
-    const alpha = (this.life / this.maxLife) * 0.7;
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = this.color;
-    for (const b of this.blobs) {
-      ctx.beginPath();
-      ctx.arc(this.x + b.ox, this.y + b.oy, b.r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.globalAlpha = 1;
-  }
+  update(){ return --this.life>0; }
+  draw(){ ctx.globalAlpha=(this.life/this.maxLife)*.7; ctx.fillStyle=this.color;
+    for(const b of this.blobs){ ctx.beginPath(); ctx.arc(this.x+b.ox,this.y+b.oy,b.r,0,Math.PI*2); ctx.fill(); }
+    ctx.globalAlpha=1; }
 }
 
-// === PARTÍCULA DIRECCIONAL ===
 class Particle {
-  constructor(x, y, dirX, dirY) {
-    this.x = x; this.y = y;
-    const spread = 0.5;
-    const speed = 4 + Math.random() * 6;
-    const angle = Math.atan2(dirY, dirX) + (Math.random() - 0.5) * spread;
-    this.vx = Math.cos(angle) * speed;
-    this.vy = Math.sin(angle) * speed;
-    this.r = 2 + Math.random() * 5;
-    this.life = 30 + Math.floor(Math.random() * 15);
-    this.maxLife = this.life;
-    this.color = BLOOD_COLORS[Math.floor(Math.random() * BLOOD_COLORS.length)];
+  constructor(x,y,dirX,dirY){ this.x=x; this.y=y;
+    const speed=4+Math.random()*6;
+    const angle=Math.atan2(dirY,dirX)+(Math.random()-.5)*.5;
+    this.vx=Math.cos(angle)*speed; this.vy=Math.sin(angle)*speed;
+    this.r=2+Math.random()*5; this.life=30+Math.floor(Math.random()*15); this.maxLife=this.life;
+    this.color=BLOOD_COLORS[Math.floor(Math.random()*3)];
   }
-  update() {
-    this.x += this.vx;
-    this.y += this.vy;
-    this.vy += 0.25;
-    this.vx *= 0.98;
-    return --this.life > 0;
-  }
-  draw() {
-    ctx.globalAlpha = this.life / this.maxLife;
-    ctx.fillStyle = this.color;
-    ctx.beginPath();
-    ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1;
-  }
+  update(){ this.x+=this.vx; this.y+=this.vy; this.vy+=.25; this.vx*=.98; return --this.life>0; }
+  draw(){ ctx.globalAlpha=this.life/this.maxLife; ctx.fillStyle=this.color;
+    ctx.beginPath(); ctx.arc(this.x,this.y,this.r,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1; }
 }
 
 class Head {
-  constructor() {
-    this.x = Math.random() * (canvas.width - 100) + 50;
-    this.y = canvas.height + 40;
-    this.vx = (Math.random() - 0.5) * 3;
-    const targetY = canvas.height * (0.1 + Math.random() * 0.25);
-    const dist = (canvas.height + 40) - targetY;
-    this.vy = -Math.sqrt(2 * GRAVITY * dist);
-    this.face = randomFace();
-    this.size = this.face.type === 'image' ? IMG_HEIGHT : HEAD_SIZE;
-    this.rot = 0;
-    this.rs = (Math.random() - 0.5) * 0.08;
+  constructor(){ this.x=Math.random()*(canvas.width-100)+50; this.y=canvas.height+40;
+    this.vx=(Math.random()-.5)*3;
+    const tY=canvas.height*(.1+Math.random()*.25);
+    this.vy=-Math.sqrt(2*GRAVITY*((canvas.height+40)-tY));
+    this.face=randomFace(); this.size=this.face.type==='image'?IMG_HEIGHT:HEAD_SIZE;
+    this.rot=0; this.rs=(Math.random()-.5)*.08;
   }
-  update() {
-    this.x += this.vx;
-    this.y += this.vy;
-    this.vy += GRAVITY;
-    this.rot += this.rs;
-    if (this.y > canvas.height + 60 && this.vy > 0) {
-      lives--;
-      updateUI();
-      if (lives <= 0) endGame();
+  update(){ this.x+=this.vx; this.y+=this.vy; this.vy+=GRAVITY; this.rot+=this.rs;
+    if(this.y>canvas.height+60&&this.vy>0){
+      if(gameMode===1){ lives--; updateUI(); if(lives<=0) endGame1P(); }
       return false;
-    }
-    return true;
+    } return true;
   }
-  draw() {
-    ctx.save();
-    ctx.translate(this.x, this.y);
-    ctx.rotate(this.rot);
-    if (this.face.type === 'emoji') {
-      ctx.font = HEAD_SIZE + 'px serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(this.face.value, 0, 0);
-    } else {
-      const img = this.face.value;
-      const w = img.drawW || IMG_HEIGHT;
-      const h = img.drawH || IMG_HEIGHT;
-      ctx.drawImage(img, -w/2, -h/2, w, h);
-    }
-    ctx.restore();
-  }
+  draw(){ ctx.save(); ctx.translate(this.x,this.y); ctx.rotate(this.rot);
+    if(this.face.type==='emoji'){ ctx.font=HEAD_SIZE+'px serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(this.face.value,0,0); }
+    else{ const img=this.face.value; const w=img.drawW||IMG_HEIGHT; const h=img.drawH||IMG_HEIGHT; ctx.drawImage(img,-w/2,-h/2,w,h); }
+    ctx.restore(); }
 }
 
 class Half {
-  constructor(x, y, face, dir) {
-    this.x = x; this.y = y;
-    this.vx = dir * (Math.random() * 2 + 2);
-    this.vy = -2;
-    this.face = face;
-    this.size = face.type === 'image' ? IMG_HEIGHT : HEAD_SIZE;
-    this.rot = 0;
-    this.rs = dir * 0.1;
-    this.life = 40;
-  }
-  update() {
-    this.x += this.vx;
-    this.y += this.vy;
-    this.vy += 0.35;
-    this.rot += this.rs;
-    return --this.life > 0;
-  }
-  draw() {
-    const img = this.face.type === 'image' ? this.face.value : null;
-    const w = img ? (img.drawW || IMG_HEIGHT) : HEAD_SIZE;
-    const h = img ? (img.drawH || IMG_HEIGHT) : HEAD_SIZE;
-    const halfH = h / 2;
-
-    ctx.save();
-    ctx.translate(this.x, this.y);
-    ctx.rotate(this.rot);
-    ctx.globalAlpha = this.life / 40;
-    ctx.beginPath();
-    ctx.rect(-w/2, -halfH, w, halfH);
-    ctx.clip();
-    if (this.face.type === 'emoji') {
-      ctx.font = HEAD_SIZE + 'px serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(this.face.value, 0, 0);
-    } else {
-      ctx.drawImage(img, -w/2, -halfH, w, h);
-    }
-    ctx.restore();
-  }
+  constructor(x,y,face,dir){ this.x=x; this.y=y; this.vx=dir*(Math.random()*2+2); this.vy=-2;
+    this.face=face; this.size=face.type==='image'?IMG_HEIGHT:HEAD_SIZE;
+    this.rot=0; this.rs=dir*.1; this.life=40; }
+  update(){ this.x+=this.vx; this.y+=this.vy; this.vy+=.35; this.rot+=this.rs; return --this.life>0; }
+  draw(){ const img=this.face.type==='image'?this.face.value:null;
+    const w=img?(img.drawW||IMG_HEIGHT):HEAD_SIZE; const h=img?(img.drawH||IMG_HEIGHT):HEAD_SIZE;
+    ctx.save(); ctx.translate(this.x,this.y); ctx.rotate(this.rot); ctx.globalAlpha=this.life/40;
+    ctx.beginPath(); ctx.rect(-w/2,-h/2,w,h/2); ctx.clip();
+    if(this.face.type==='emoji'){ ctx.font=HEAD_SIZE+'px serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(this.face.value,0,0); }
+    else ctx.drawImage(img,-w/2,-h/2,w,h);
+    ctx.restore(); }
 }
 
-function segIntersectsCircle(x1, y1, x2, y2, cx, cy, r) {
-  const dx = x2 - x1, dy = y2 - y1;
-  const fx = x1 - cx, fy = y1 - cy;
-  const len2 = dx * dx + dy * dy;
-  if (len2 === 0) return (fx * fx + fy * fy) <= r * r;
-  let t = -((fx * dx + fy * dy) / len2);
-  t = Math.max(0, Math.min(1, t));
-  const closestX = x1 + t * dx;
-  const closestY = y1 + t * dy;
-  const distX = closestX - cx, distY = closestY - cy;
-  return (distX * distX + distY * distY) <= r * r;
+function segIntersectsCircle(x1,y1,x2,y2,cx,cy,r){
+  const dx=x2-x1,dy=y2-y1,fx=x1-cx,fy=y1-cy;
+  const len2=dx*dx+dy*dy;
+  if(len2===0) return fx*fx+fy*fy<=r*r;
+  let t=-((fx*dx+fy*dy)/len2); t=Math.max(0,Math.min(1,t));
+  const px=x1+t*dx-cx, py=y1+t*dy-cy;
+  return px*px+py*py<=r*r;
 }
 
-function slice(x1, y1, x2, y2) {
-  const dx = x2 - x1, dy = y2 - y1;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  if (dist < MIN_SWIPE) return;
+function doSlice(x1,y1,x2,y2,player){
+  const dx=x2-x1,dy=y2-y1;
+  const dist=Math.sqrt(dx*dx+dy*dy);
+  if(dist<MIN_SWIPE) return;
+  const dirX=dx/dist, dirY=dy/dist;
 
-  const dirX = dx / dist;
-  const dirY = dy / dist;
-
-  for (let i = heads.length - 1; i >= 0; i--) {
-    const h = heads[i];
-    const radius = h.size * 0.4;
-    if (segIntersectsCircle(x1, y1, x2, y2, h.x, h.y, radius)) {
-      heads.splice(i, 1);
-      score += 10;
-      updateUI();
+  for(let i=heads.length-1;i>=0;i--){
+    const h=heads[i];
+    const radius=h.size*.4;
+    if(segIntersectsCircle(x1,y1,x2,y2,h.x,h.y,radius)){
+      heads.splice(i,1);
       playSlice();
+      shakeTimer=8; shakeIntensity=4;
 
-      // Vibración
-      shakeTimer = 8;
-      shakeIntensity = 4;
+      if(gameMode===1){ score+=10; }
+      else if(player===1){ score1+=10; }
+      else if(player===2){ score2+=10; }
+      updateUI();
 
-      // Mitades
-      halves.push(new Half(h.x, h.y, h.face, -1));
-      halves.push(new Half(h.x, h.y, h.face, 1));
-
-      // Partículas direccionales
-      for (let j = 0; j < 15; j++) {
-        particles.push(new Particle(h.x, h.y, dirX, dirY));
-      }
-
-      // Manchas más dispersas
-      for (let j = 0; j < 4; j++) {
-        stains.push(new Stain(
-          h.x + (Math.random() - 0.5) * 80,
-          h.y + (Math.random() - 0.5) * 80
-        ));
-      }
+      halves.push(new Half(h.x,h.y,h.face,-1));
+      halves.push(new Half(h.x,h.y,h.face,1));
+      for(let j=0;j<15;j++) particles.push(new Particle(h.x,h.y,dirX,dirY));
+      for(let j=0;j<4;j++) stains.push(new Stain(h.x+(Math.random()-.5)*80, h.y+(Math.random()-.5)*80));
     }
   }
 }
 
-function updateUI() {
-  document.getElementById('score').textContent = score;
-  document.getElementById('lives').textContent = lives;
-}
-
-function endGame() {
-  gameOver = true;
-  document.getElementById('gameover').style.display = 'block';
-}
-
-function reset() {
-  heads = []; particles = []; halves = []; trail = []; stains = [];
-  score = 0; lives = 3; difficulty = 1; gameOver = false; spawnTimer = 0;
-  shakeTimer = 0; shakeIntensity = 0;
-  prevMouse = null;
-  document.getElementById('gameover').style.display = 'none';
-  updateUI();
-}
-
-// Mouse
-let mouseDown = false;
-canvas.addEventListener('mousedown', e => {
-  mouseDown = true;
-  prevMouse = { x: e.clientX, y: e.clientY };
-});
-canvas.addEventListener('mouseup', () => { mouseDown = false; trail = []; prevMouse = null; });
-canvas.addEventListener('mousemove', e => {
-  if (!mouseDown || gameOver || !gameStarted) return;
-  const curr = { x: e.clientX, y: e.clientY };
-  trail.push(curr);
-  if (trail.length > 8) trail.shift();
-  if (prevMouse) {
-    slice(prevMouse.x, prevMouse.y, curr.x, curr.y);
+function updateUI(){
+  if(gameMode===1){
+    document.getElementById('score').textContent=score;
+    document.getElementById('lives').textContent=lives;
+  } else {
+    document.getElementById('score1').textContent=score1;
+    document.getElementById('score2').textContent=score2;
+    document.getElementById('timer').textContent=timeLeft;
   }
-  prevMouse = curr;
+}
+
+function endGame1P(){
+  gameOver=true;
+  document.getElementById('winnerText').textContent='';
+  document.getElementById('goText').textContent='Pulsa para jugar otra vez';
+  document.getElementById('gameover').style.display='block';
+}
+
+function resetToMenu(){
+  gameStarted=false; gameOver=false;
+  if(timerInterval) clearInterval(timerInterval);
+  document.getElementById('gameover').style.display='none';
+  document.getElementById('ui').style.display='none';
+  document.getElementById('ui2p').style.display='none';
+  document.getElementById('startScreen').style.display='flex';
+}
+
+// === INPUT: MOUSE (1P) ===
+let mouseDown=false;
+canvas.addEventListener('mousedown',e=>{
+  if(gameMode!==1||!gameStarted||gameOver) return;
+  mouseDown=true; prevMouse={x:e.clientX,y:e.clientY};
+});
+canvas.addEventListener('mouseup',()=>{ mouseDown=false; trail=[]; prevMouse=null; });
+canvas.addEventListener('mousemove',e=>{
+  if(gameMode!==1||!mouseDown||gameOver||!gameStarted) return;
+  const curr={x:e.clientX,y:e.clientY};
+  trail.push(curr); if(trail.length>8) trail.shift();
+  if(prevMouse) doSlice(prevMouse.x,prevMouse.y,curr.x,curr.y,0);
+  prevMouse=curr;
 });
 
-// Touch
-canvas.addEventListener('touchstart', e => {
+// === INPUT: TOUCH (1P y 2P) ===
+canvas.addEventListener('touchstart',e=>{
   e.preventDefault();
-  if (!gameStarted || gameOver) return;
-  const t = e.touches[0];
-  prevMouse = { x: t.clientX, y: t.clientY };
-}, { passive: false });
-
-canvas.addEventListener('touchmove', e => {
-  e.preventDefault();
-  if (gameOver || !gameStarted) return;
-  const t = e.touches[0];
-  const curr = { x: t.clientX, y: t.clientY };
-  trail.push(curr);
-  if (trail.length > 8) trail.shift();
-  if (prevMouse) {
-    slice(prevMouse.x, prevMouse.y, curr.x, curr.y);
+  if(!gameStarted||gameOver) return;
+  for(const t of e.changedTouches){
+    if(gameMode===1){
+      prevMouse={x:t.clientX,y:t.clientY};
+    } else {
+      // Asignar jugador
+      let player=0;
+      if(!playerAssign[0]){ player=1; playerAssign[0]=true; }
+      else if(!playerAssign[1]){ player=2; playerAssign[1]=true; }
+      if(player>0) activeTouches[t.identifier]={player,prevX:t.clientX,prevY:t.clientY};
+    }
   }
-  prevMouse = curr;
-}, { passive: false });
+},{passive:false});
 
-canvas.addEventListener('touchend', e => {
+canvas.addEventListener('touchmove',e=>{
   e.preventDefault();
-  trail = [];
-  prevMouse = null;
-}, { passive: false });
+  if(gameOver||!gameStarted) return;
+  for(const t of e.changedTouches){
+    if(gameMode===1){
+      const curr={x:t.clientX,y:t.clientY};
+      trail.push(curr); if(trail.length>8) trail.shift();
+      if(prevMouse) doSlice(prevMouse.x,prevMouse.y,curr.x,curr.y,0);
+      prevMouse=curr;
+    } else {
+      const info=activeTouches[t.identifier];
+      if(info){
+        doSlice(info.prevX,info.prevY,t.clientX,t.clientY,info.player);
+        info.prevX=t.clientX; info.prevY=t.clientY;
+      }
+    }
+  }
+},{passive:false});
+
+canvas.addEventListener('touchend',e=>{
+  e.preventDefault();
+  for(const t of e.changedTouches){
+    if(gameMode===1){ trail=[]; prevMouse=null; }
+    else {
+      const info=activeTouches[t.identifier];
+      if(info){ playerAssign[info.player-1]=false; delete activeTouches[t.identifier]; }
+    }
+  }
+},{passive:false});
 
 // Reiniciar
-document.getElementById('gameover').addEventListener('click', () => {
-  if (gameOver) reset();
-});
-document.getElementById('gameover').addEventListener('touchend', e => {
-  e.preventDefault();
-  if (gameOver) reset();
-});
-document.addEventListener('keydown', e => {
-  if (e.code === 'Space' && gameOver) reset();
-});
+document.getElementById('gameover').addEventListener('click',()=>{ if(gameOver) resetToMenu(); });
+document.getElementById('gameover').addEventListener('touchend',e=>{ e.preventDefault(); if(gameOver) resetToMenu(); });
+document.addEventListener('keydown',e=>{ if(e.code==='Space'&&gameOver) resetToMenu(); });
 
-function loop() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+function loop(){
+  if(!gameStarted) return;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  // Vibración
   ctx.save();
-  if (shakeTimer > 0) {
-    shakeTimer--;
-    const sx = (Math.random() - 0.5) * shakeIntensity * 2;
-    const sy = (Math.random() - 0.5) * shakeIntensity * 2;
-    ctx.translate(sx, sy);
-    shakeIntensity *= 0.85;
+  if(shakeTimer>0){ shakeTimer--;
+    ctx.translate((Math.random()-.5)*shakeIntensity*2,(Math.random()-.5)*shakeIntensity*2);
+    shakeIntensity*=.85;
   }
 
-  if (!gameOver) {
+  if(!gameOver){
     spawnTimer++;
-    const interval = Math.max(30, 70 - difficulty * 5);
-    if (spawnTimer >= interval) {
-      spawnTimer = 0;
-      if (heads.length < 6) heads.push(new Head());
-      difficulty += 0.05;
-    }
-    heads = heads.filter(h => h.update());
+    const interval=Math.max(30,70-difficulty*5);
+    if(spawnTimer>=interval){ spawnTimer=0; if(heads.length<6) heads.push(new Head()); difficulty+=.05; }
+    heads=heads.filter(h=>h.update());
   }
 
-  heads.forEach(h => h.draw());
-  halves = halves.filter(h => h.update());
-  halves.forEach(h => h.draw());
-  particles = particles.filter(p => p.update());
-  particles.forEach(p => p.draw());
+  heads.forEach(h=>h.draw());
+  halves=halves.filter(h=>h.update()); halves.forEach(h=>h.draw());
+  particles=particles.filter(p=>p.update()); particles.forEach(p=>p.draw());
+  stains=stains.filter(s=>s.update()); stains.forEach(s=>s.draw());
 
-  // Manchas delante
-  stains = stains.filter(s => s.update());
-  stains.forEach(s => s.draw());
-
-  if (trail.length > 1) {
-    ctx.beginPath();
-    ctx.moveTo(trail[0].x, trail[0].y);
-    for (let i = 1; i < trail.length; i++) ctx.lineTo(trail[i].x, trail[i].y);
-    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    ctx.stroke();
+  if(trail.length>1){
+    ctx.beginPath(); ctx.moveTo(trail[0].x,trail[0].y);
+    for(let i=1;i<trail.length;i++) ctx.lineTo(trail[i].x,trail[i].y);
+    ctx.strokeStyle='rgba(255,255,255,0.6)'; ctx.lineWidth=3; ctx.lineCap='round'; ctx.stroke();
   }
 
   ctx.restore();
-
   requestAnimationFrame(loop);
 }
 
