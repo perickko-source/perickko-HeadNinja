@@ -107,12 +107,14 @@ const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 
 let gameStarted = false;
-let heads = [], particles = [], halves = [], trail = [];
+let heads = [], particles = [], halves = [], trail = [], stains = [];
 let score = 0, lives = 3, gameOver = false, spawnTimer = 0, difficulty = 1;
+let shakeTimer = 0, shakeIntensity = 0;
 const GRAVITY = 0.22;
 const HEAD_SIZE = 80;
 const IMG_HEIGHT = 150;
 const MIN_SWIPE = 15;
+const BLOOD_COLORS = ['#880000', '#ff0000', '#cc0000'];
 
 // === SONIDO ===
 let audioCtx = null;
@@ -190,7 +192,9 @@ const imgSrcs = [
   'revestido1.png', 'revestido2.png',
   'jordi1.png', 'jordi2.png', 'jordi3.png',
   'lopez1.png', 'lopez2.png', 'lopez3.png',
-  'garcia1.png', 'garcia2.png', 'garcia3.png', 'garcia4.png'
+  'garcia1.png', 'garcia2.png', 'garcia3.png', 'garcia4.png',
+  'buryua1.png', 'buryua2.png', 'buryua3.png',
+  'cipres1.png', 'cipres2.png', 'cipres3.png'
 ];
 
 imgSrcs.forEach(src => {
@@ -212,6 +216,72 @@ function randomFace() {
 }
 
 let prevMouse = null;
+
+// === MANCHA: más grande, más dispersa, desaparece antes ===
+class Stain {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.radius = 25 + Math.random() * 35;
+    this.life = 45;
+    this.maxLife = 45;
+    this.color = BLOOD_COLORS[Math.floor(Math.random() * BLOOD_COLORS.length)];
+    this.blobs = [];
+    const numBlobs = 4 + Math.floor(Math.random() * 4);
+    for (let i = 0; i < numBlobs; i++) {
+      this.blobs.push({
+        ox: (Math.random() - 0.5) * this.radius * 1.8,
+        oy: (Math.random() - 0.5) * this.radius * 1.8,
+        r: this.radius * (0.3 + Math.random() * 0.6)
+      });
+    }
+  }
+  update() {
+    return --this.life > 0;
+  }
+  draw() {
+    const alpha = (this.life / this.maxLife) * 0.7;
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = this.color;
+    for (const b of this.blobs) {
+      ctx.beginPath();
+      ctx.arc(this.x + b.ox, this.y + b.oy, b.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+// === PARTÍCULA DIRECCIONAL ===
+class Particle {
+  constructor(x, y, dirX, dirY) {
+    this.x = x; this.y = y;
+    const spread = 0.5;
+    const speed = 4 + Math.random() * 6;
+    const angle = Math.atan2(dirY, dirX) + (Math.random() - 0.5) * spread;
+    this.vx = Math.cos(angle) * speed;
+    this.vy = Math.sin(angle) * speed;
+    this.r = 2 + Math.random() * 5;
+    this.life = 30 + Math.floor(Math.random() * 15);
+    this.maxLife = this.life;
+    this.color = BLOOD_COLORS[Math.floor(Math.random() * BLOOD_COLORS.length)];
+  }
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.vy += 0.25;
+    this.vx *= 0.98;
+    return --this.life > 0;
+  }
+  draw() {
+    ctx.globalAlpha = this.life / this.maxLife;
+    ctx.fillStyle = this.color;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+}
 
 class Head {
   constructor() {
@@ -301,28 +371,6 @@ class Half {
   }
 }
 
-class Particle {
-  constructor(x, y) {
-    this.x = x; this.y = y;
-    this.vx = (Math.random() - 0.5) * 7;
-    this.vy = (Math.random() - 0.5) * 7;
-    this.r = Math.random() * 4 + 2;
-    this.life = 25;
-  }
-  update() {
-    this.x += this.vx;
-    this.y += this.vy;
-    this.vy += 0.2;
-    return --this.life > 0;
-  }
-  draw() {
-    ctx.globalAlpha = this.life / 25;
-    ctx.fillStyle = '#c00';
-    ctx.fillRect(this.x - this.r, this.y - this.r, this.r * 2, this.r * 2);
-    ctx.globalAlpha = 1;
-  }
-}
-
 function segIntersectsCircle(x1, y1, x2, y2, cx, cy, r) {
   const dx = x2 - x1, dy = y2 - y1;
   const fx = x1 - cx, fy = y1 - cy;
@@ -341,6 +389,9 @@ function slice(x1, y1, x2, y2) {
   const dist = Math.sqrt(dx * dx + dy * dy);
   if (dist < MIN_SWIPE) return;
 
+  const dirX = dx / dist;
+  const dirY = dy / dist;
+
   for (let i = heads.length - 1; i >= 0; i--) {
     const h = heads[i];
     const radius = h.size * 0.4;
@@ -349,9 +400,27 @@ function slice(x1, y1, x2, y2) {
       score += 10;
       updateUI();
       playSlice();
+
+      // Vibración
+      shakeTimer = 8;
+      shakeIntensity = 4;
+
+      // Mitades
       halves.push(new Half(h.x, h.y, h.face, -1));
       halves.push(new Half(h.x, h.y, h.face, 1));
-      for (let j = 0; j < 8; j++) particles.push(new Particle(h.x, h.y));
+
+      // Partículas direccionales
+      for (let j = 0; j < 15; j++) {
+        particles.push(new Particle(h.x, h.y, dirX, dirY));
+      }
+
+      // Manchas más dispersas
+      for (let j = 0; j < 4; j++) {
+        stains.push(new Stain(
+          h.x + (Math.random() - 0.5) * 80,
+          h.y + (Math.random() - 0.5) * 80
+        ));
+      }
     }
   }
 }
@@ -367,8 +436,9 @@ function endGame() {
 }
 
 function reset() {
-  heads = []; particles = []; halves = []; trail = [];
+  heads = []; particles = []; halves = []; trail = []; stains = [];
   score = 0; lives = 3; difficulty = 1; gameOver = false; spawnTimer = 0;
+  shakeTimer = 0; shakeIntensity = 0;
   prevMouse = null;
   document.getElementById('gameover').style.display = 'none';
   updateUI();
@@ -434,6 +504,16 @@ document.addEventListener('keydown', e => {
 function loop() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+  // Vibración
+  ctx.save();
+  if (shakeTimer > 0) {
+    shakeTimer--;
+    const sx = (Math.random() - 0.5) * shakeIntensity * 2;
+    const sy = (Math.random() - 0.5) * shakeIntensity * 2;
+    ctx.translate(sx, sy);
+    shakeIntensity *= 0.85;
+  }
+
   if (!gameOver) {
     spawnTimer++;
     const interval = Math.max(30, 70 - difficulty * 5);
@@ -451,6 +531,10 @@ function loop() {
   particles = particles.filter(p => p.update());
   particles.forEach(p => p.draw());
 
+  // Manchas delante
+  stains = stains.filter(s => s.update());
+  stains.forEach(s => s.draw());
+
   if (trail.length > 1) {
     ctx.beginPath();
     ctx.moveTo(trail[0].x, trail[0].y);
@@ -460,6 +544,8 @@ function loop() {
     ctx.lineCap = 'round';
     ctx.stroke();
   }
+
+  ctx.restore();
 
   requestAnimationFrame(loop);
 }
