@@ -129,8 +129,8 @@ const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 
 let gameStarted = false;
-let gameMode = 1; // 1 o 2 jugadores
-let heads = [], particles = [], halves = [], trail = [], stains = [];
+let gameMode = 1;
+let heads = [], particles = [], halves = [], stains = [];
 let score = 0, lives = 3, gameOver = false, spawnTimer = 0, difficulty = 1;
 let shakeTimer = 0, shakeIntensity = 0;
 const GRAVITY = 0.22;
@@ -143,8 +143,10 @@ const BLOOD_COLORS = ['#880000', '#ff0000', '#cc0000'];
 let score1 = 0, score2 = 0;
 let timeLeft = 60;
 let timerInterval = null;
-let activeTouches = {}; // touchId -> { player, prevX, prevY }
-let playerAssign = [false, false]; // [p1activo, p2activo]
+let activeTouches = {};
+let playerAssign = [false, false];
+let trail1 = [], trail2 = []; // Trails separados por jugador
+let trail1P = []; // Trail para 1 jugador
 
 // === SONIDO ===
 let audioCtx = null, sliceBuffer = null;
@@ -194,7 +196,8 @@ function startGame(mode) {
   canvas.height = window.innerHeight;
   gameStarted = true;
   gameOver = false;
-  heads = []; particles = []; halves = []; trail = []; stains = [];
+  heads = []; particles = []; halves = []; stains = [];
+  trail1 = []; trail2 = []; trail1P = [];
   score = 0; lives = 3; difficulty = 1; spawnTimer = 0;
   score1 = 0; score2 = 0; timeLeft = 60;
   activeTouches = {}; playerAssign = [false, false];
@@ -393,11 +396,11 @@ canvas.addEventListener('mousedown',e=>{
   if(gameMode!==1||!gameStarted||gameOver) return;
   mouseDown=true; prevMouse={x:e.clientX,y:e.clientY};
 });
-canvas.addEventListener('mouseup',()=>{ mouseDown=false; trail=[]; prevMouse=null; });
+canvas.addEventListener('mouseup',()=>{ mouseDown=false; trail1P=[]; prevMouse=null; });
 canvas.addEventListener('mousemove',e=>{
   if(gameMode!==1||!mouseDown||gameOver||!gameStarted) return;
   const curr={x:e.clientX,y:e.clientY};
-  trail.push(curr); if(trail.length>8) trail.shift();
+  trail1P.push(curr); if(trail1P.length>8) trail1P.shift();
   if(prevMouse) doSlice(prevMouse.x,prevMouse.y,curr.x,curr.y,0);
   prevMouse=curr;
 });
@@ -410,7 +413,6 @@ canvas.addEventListener('touchstart',e=>{
     if(gameMode===1){
       prevMouse={x:t.clientX,y:t.clientY};
     } else {
-      // Asignar jugador
       let player=0;
       if(!playerAssign[0]){ player=1; playerAssign[0]=true; }
       else if(!playerAssign[1]){ player=2; playerAssign[1]=true; }
@@ -425,12 +427,16 @@ canvas.addEventListener('touchmove',e=>{
   for(const t of e.changedTouches){
     if(gameMode===1){
       const curr={x:t.clientX,y:t.clientY};
-      trail.push(curr); if(trail.length>8) trail.shift();
+      trail1P.push(curr); if(trail1P.length>8) trail1P.shift();
       if(prevMouse) doSlice(prevMouse.x,prevMouse.y,curr.x,curr.y,0);
       prevMouse=curr;
     } else {
       const info=activeTouches[t.identifier];
       if(info){
+        // Añadir al trail del jugador
+        const trail = info.player===1 ? trail1 : trail2;
+        trail.push({x:t.clientX,y:t.clientY});
+        if(trail.length>10) trail.shift();
         doSlice(info.prevX,info.prevY,t.clientX,t.clientY,info.player);
         info.prevX=t.clientX; info.prevY=t.clientY;
       }
@@ -441,10 +447,15 @@ canvas.addEventListener('touchmove',e=>{
 canvas.addEventListener('touchend',e=>{
   e.preventDefault();
   for(const t of e.changedTouches){
-    if(gameMode===1){ trail=[]; prevMouse=null; }
+    if(gameMode===1){ trail1P=[]; prevMouse=null; }
     else {
       const info=activeTouches[t.identifier];
-      if(info){ playerAssign[info.player-1]=false; delete activeTouches[t.identifier]; }
+      if(info){
+        if(info.player===1) trail1=[];
+        else trail2=[];
+        playerAssign[info.player-1]=false;
+        delete activeTouches[t.identifier];
+      }
     }
   }
 },{passive:false});
@@ -453,6 +464,19 @@ canvas.addEventListener('touchend',e=>{
 document.getElementById('gameover').addEventListener('click',()=>{ if(gameOver) resetToMenu(); });
 document.getElementById('gameover').addEventListener('touchend',e=>{ e.preventDefault(); if(gameOver) resetToMenu(); });
 document.addEventListener('keydown',e=>{ if(e.code==='Space'&&gameOver) resetToMenu(); });
+
+// === DRAW TRAIL ===
+function drawTrail(trail, color) {
+  if(trail.length<2) return;
+  ctx.beginPath();
+  ctx.moveTo(trail[0].x, trail[0].y);
+  for(let i=1;i<trail.length;i++) ctx.lineTo(trail[i].x, trail[i].y);
+  ctx.strokeStyle=color;
+  ctx.lineWidth=4;
+  ctx.lineCap='round';
+  ctx.lineJoin='round';
+  ctx.stroke();
+}
 
 function loop(){
   if(!gameStarted) return;
@@ -476,10 +500,12 @@ function loop(){
   particles=particles.filter(p=>p.update()); particles.forEach(p=>p.draw());
   stains=stains.filter(s=>s.update()); stains.forEach(s=>s.draw());
 
-  if(trail.length>1){
-    ctx.beginPath(); ctx.moveTo(trail[0].x,trail[0].y);
-    for(let i=1;i<trail.length;i++) ctx.lineTo(trail[i].x,trail[i].y);
-    ctx.strokeStyle='rgba(255,255,255,0.6)'; ctx.lineWidth=3; ctx.lineCap='round'; ctx.stroke();
+  // Trails
+  if(gameMode===1){
+    drawTrail(trail1P, 'rgba(255,255,255,0.6)');
+  } else {
+    drawTrail(trail1, 'rgba(79,195,247,0.8)');  // Azul P1
+    drawTrail(trail2, 'rgba(255,138,101,0.8)'); // Naranja P2
   }
 
   ctx.restore();
