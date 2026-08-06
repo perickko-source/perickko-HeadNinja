@@ -130,14 +130,17 @@ const ctx = canvas.getContext('2d');
 
 let gameStarted = false;
 let gameMode = 1;
-let heads = [], particles = [], halves = [], stains = [];
+let heads = [], particles = [], halves = [], stains = [], comboTexts = [];
 let score = 0, lives = 3, gameOver = false, spawnTimer = 0, difficulty = 1;
 let shakeTimer = 0, shakeIntensity = 0;
 const GRAVITY = 0.22;
 const HEAD_SIZE = 80;
 const IMG_HEIGHT = 150;
 const MIN_SWIPE = 15;
+const MAX_HITS = 3;
 const BLOOD_COLORS = ['#880000', '#ff0000', '#cc0000'];
+const COMBO_COLORS = ['#ffffff', '#ffdd00', '#ff6600'];
+const COMBO_TEXTS = ['¡COMBO!', '¡DOBLE COMBO!', '¡TRIPLE COMBO!'];
 
 // 2P
 let score1 = 0, score2 = 0;
@@ -145,12 +148,10 @@ let timeLeft = 60;
 let timerInterval = null;
 let activeTouches = {};
 let playerAssign = [false, false];
-let trail1 = [], trail2 = []; // Trails separados por jugador
-let trail1P = []; // Trail para 1 jugador
+let trail1 = [], trail2 = [], trail1P = [];
 
 // === SONIDO ===
 let audioCtx = null, sliceBuffer = null;
-
 function initAudio() {
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   loadSound('chaf.ogg', () => { loadSound('chaf.mp3', () => {}); });
@@ -196,7 +197,7 @@ function startGame(mode) {
   canvas.height = window.innerHeight;
   gameStarted = true;
   gameOver = false;
-  heads = []; particles = []; halves = []; stains = [];
+  heads = []; particles = []; halves = []; stains = []; comboTexts = [];
   trail1 = []; trail2 = []; trail1P = [];
   score = 0; lives = 3; difficulty = 1; spawnTimer = 0;
   score1 = 0; score2 = 0; timeLeft = 60;
@@ -268,6 +269,148 @@ function randomFace() {
 
 let prevMouse = null;
 
+// === TEXTO COMBO ===
+class ComboText {
+  constructor(x, y, text, color) {
+    this.x = x; this.y = y;
+    this.text = text;
+    this.color = color;
+    this.life = 50;
+    this.maxLife = 50;
+    this.scale = 0;
+  }
+  update() {
+    this.life--;
+    // Animación de escala: crece rápido y luego se mantiene
+    if (this.scale < 1) this.scale += 0.15;
+    if (this.scale > 1) this.scale = 1;
+    return this.life > 0;
+  }
+  draw() {
+    const alpha = Math.min(1, this.life / 20);
+    const size = 36 * this.scale;
+    ctx.save();
+    ctx.translate(this.x, this.y - (1 - this.life/this.maxLife) * 30);
+    ctx.scale(this.scale, this.scale);
+    ctx.globalAlpha = alpha;
+    ctx.font = 'bold ' + size + 'px Arial Black';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 4;
+    ctx.strokeText(this.text, 0, 0);
+    ctx.fillStyle = this.color;
+    ctx.fillText(this.text, 0, 0);
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+}
+
+// === TROZO TRANSVERSAL ===
+class TransversalPiece {
+  constructor(x, y, face, size, dirUp, sliceIndex) {
+    this.x = x; this.y = y;
+    this.face = face;
+    this.size = size;
+    // Dirección horizontal: sale hacia arriba o abajo
+    this.vx = (Math.random() - 0.5) * 3;
+    this.vy = dirUp ? -(3 + Math.random() * 3) : (2 + Math.random() * 2);
+    this.rot = 0;
+    this.rs = (Math.random() - 0.5) * 0.15;
+    this.life = 45;
+    // Región del corte: qué franja horizontal representa
+    this.sliceIndex = sliceIndex; // 0=top, 1=mid, 2=bottom
+    this.totalSlices = MAX_HITS + 1;
+  }
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.vy += 0.35;
+    this.rot += this.rs;
+    return --this.life > 0;
+  }
+  draw() {
+    const img = this.face.type === 'image' ? this.face.value : null;
+    const w = img ? (img.drawW || IMG_HEIGHT) : HEAD_SIZE;
+    const h = img ? (img.drawH || IMG_HEIGHT) : HEAD_SIZE;
+    const sliceH = h / this.totalSlices;
+    const offsetY = -h/2 + this.sliceIndex * sliceH;
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rot);
+    ctx.globalAlpha = this.life / 45;
+    ctx.beginPath();
+    ctx.rect(-w/2, offsetY, w, sliceH);
+    ctx.clip();
+    if (this.face.type === 'emoji') {
+      ctx.font = HEAD_SIZE + 'px serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(this.face.value, 0, 0);
+    } else {
+      ctx.drawImage(img, -w/2, -h/2, w, h);
+    }
+    ctx.restore();
+  }
+}
+
+// === CABEZA CON CORTES MÚLTIPLES ===
+class Head {
+  constructor() {
+    this.x = Math.random() * (canvas.width - 100) + 50;
+    this.y = canvas.height + 40;
+    this.vx = (Math.random() - 0.5) * 3;
+    const tY = canvas.height * (0.1 + Math.random() * 0.25);
+    this.vy = -Math.sqrt(2 * GRAVITY * ((canvas.height + 40) - tY));
+    this.face = randomFace();
+    this.baseSize = this.face.type === 'image' ? IMG_HEIGHT : HEAD_SIZE;
+    this.size = this.baseSize;
+    this.hits = 0;
+    this.rot = 0;
+    this.rs = (Math.random() - 0.5) * 0.08;
+    this.flash = 0;
+  }
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.vy += GRAVITY;
+    this.rot += this.rs;
+    if (this.flash > 0) this.flash--;
+    if (this.y > canvas.height + 60 && this.vy > 0) {
+      if (gameMode === 1) { lives--; updateUI(); if (lives <= 0) endGame1P(); }
+      return false;
+    }
+    return true;
+  }
+  hit() {
+    this.hits++;
+    this.flash = 6;
+    this.size = this.baseSize * (1 - this.hits * 0.12);
+    return this.hits >= MAX_HITS;
+  }
+  draw() {
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rot);
+    if (this.flash > 0) ctx.globalAlpha = 0.6 + Math.random() * 0.4;
+    if (this.face.type === 'emoji') {
+      ctx.font = this.size + 'px serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(this.face.value, 0, 0);
+    } else {
+      const img = this.face.value;
+      const scale = this.size / this.baseSize;
+      const w = (img.drawW || IMG_HEIGHT) * scale;
+      const h = (img.drawH || IMG_HEIGHT) * scale;
+      ctx.drawImage(img, -w/2, -h/2, w, h);
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+}
+
 class Stain {
   constructor(x,y){ this.x=x; this.y=y; this.radius=25+Math.random()*35; this.life=45; this.maxLife=45;
     this.color=BLOOD_COLORS[Math.floor(Math.random()*3)]; this.blobs=[];
@@ -293,40 +436,6 @@ class Particle {
     ctx.beginPath(); ctx.arc(this.x,this.y,this.r,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1; }
 }
 
-class Head {
-  constructor(){ this.x=Math.random()*(canvas.width-100)+50; this.y=canvas.height+40;
-    this.vx=(Math.random()-.5)*3;
-    const tY=canvas.height*(.1+Math.random()*.25);
-    this.vy=-Math.sqrt(2*GRAVITY*((canvas.height+40)-tY));
-    this.face=randomFace(); this.size=this.face.type==='image'?IMG_HEIGHT:HEAD_SIZE;
-    this.rot=0; this.rs=(Math.random()-.5)*.08;
-  }
-  update(){ this.x+=this.vx; this.y+=this.vy; this.vy+=GRAVITY; this.rot+=this.rs;
-    if(this.y>canvas.height+60&&this.vy>0){
-      if(gameMode===1){ lives--; updateUI(); if(lives<=0) endGame1P(); }
-      return false;
-    } return true;
-  }
-  draw(){ ctx.save(); ctx.translate(this.x,this.y); ctx.rotate(this.rot);
-    if(this.face.type==='emoji'){ ctx.font=HEAD_SIZE+'px serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(this.face.value,0,0); }
-    else{ const img=this.face.value; const w=img.drawW||IMG_HEIGHT; const h=img.drawH||IMG_HEIGHT; ctx.drawImage(img,-w/2,-h/2,w,h); }
-    ctx.restore(); }
-}
-
-class Half {
-  constructor(x,y,face,dir){ this.x=x; this.y=y; this.vx=dir*(Math.random()*2+2); this.vy=-2;
-    this.face=face; this.size=face.type==='image'?IMG_HEIGHT:HEAD_SIZE;
-    this.rot=0; this.rs=dir*.1; this.life=40; }
-  update(){ this.x+=this.vx; this.y+=this.vy; this.vy+=.35; this.rot+=this.rs; return --this.life>0; }
-  draw(){ const img=this.face.type==='image'?this.face.value:null;
-    const w=img?(img.drawW||IMG_HEIGHT):HEAD_SIZE; const h=img?(img.drawH||IMG_HEIGHT):HEAD_SIZE;
-    ctx.save(); ctx.translate(this.x,this.y); ctx.rotate(this.rot); ctx.globalAlpha=this.life/40;
-    ctx.beginPath(); ctx.rect(-w/2,-h/2,w,h/2); ctx.clip();
-    if(this.face.type==='emoji'){ ctx.font=HEAD_SIZE+'px serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(this.face.value,0,0); }
-    else ctx.drawImage(img,-w/2,-h/2,w,h);
-    ctx.restore(); }
-}
-
 function segIntersectsCircle(x1,y1,x2,y2,cx,cy,r){
   const dx=x2-x1,dy=y2-y1,fx=x1-cx,fy=y1-cy;
   const len2=dx*dx+dy*dy;
@@ -346,19 +455,46 @@ function doSlice(x1,y1,x2,y2,player){
     const h=heads[i];
     const radius=h.size*.4;
     if(segIntersectsCircle(x1,y1,x2,y2,h.x,h.y,radius)){
-      heads.splice(i,1);
+      const destroyed=h.hit();
       playSlice();
       shakeTimer=8; shakeIntensity=4;
 
+      // Puntuación
       if(gameMode===1){ score+=10; }
       else if(player===1){ score1+=10; }
       else if(player===2){ score2+=10; }
       updateUI();
 
-      halves.push(new Half(h.x,h.y,h.face,-1));
-      halves.push(new Half(h.x,h.y,h.face,1));
-      for(let j=0;j<15;j++) particles.push(new Particle(h.x,h.y,dirX,dirY));
-      for(let j=0;j<4;j++) stains.push(new Stain(h.x+(Math.random()-.5)*80, h.y+(Math.random()-.5)*80));
+      // Trozos transversales (salen 2 por golpe)
+      const sliceIdx=h.hits-1;
+      halves.push(new TransversalPiece(h.x,h.y,h.face,h.size,true,sliceIdx));
+      halves.push(new TransversalPiece(h.x,h.y,h.face,h.size,false,sliceIdx));
+
+      // Partículas direccionales
+      for(let j=0;j<10;j++) particles.push(new Particle(h.x,h.y,dirX,dirY));
+
+      // Manchas
+      for(let j=0;j<3;j++) stains.push(new Stain(h.x+(Math.random()-.5)*60, h.y+(Math.random()-.5)*60));
+
+      // Texto combo
+      const comboIdx=h.hits-1;
+      if(comboIdx<COMBO_TEXTS.length){
+        comboTexts.push(new ComboText(h.x,h.y-40,COMBO_TEXTS[comboIdx],COMBO_COLORS[comboIdx]));
+      }
+
+      if(destroyed){
+        heads.splice(i,1);
+        // Bonus
+        if(gameMode===1){ score+=20; }
+        else if(player===1){ score1+=20; }
+        else if(player===2){ score2+=20; }
+        updateUI();
+        // Explosión final de trozos
+        for(let j=0;j<MAX_HITS+1;j++){
+          halves.push(new TransversalPiece(h.x,h.y,h.face,h.size,(Math.random()>.5),j));
+        }
+        for(let j=0;j<12;j++) particles.push(new Particle(h.x,h.y,dirX,dirY));
+      }
     }
   }
 }
@@ -405,14 +541,13 @@ canvas.addEventListener('mousemove',e=>{
   prevMouse=curr;
 });
 
-// === INPUT: TOUCH (1P y 2P) ===
+// === INPUT: TOUCH ===
 canvas.addEventListener('touchstart',e=>{
   e.preventDefault();
   if(!gameStarted||gameOver) return;
   for(const t of e.changedTouches){
-    if(gameMode===1){
-      prevMouse={x:t.clientX,y:t.clientY};
-    } else {
+    if(gameMode===1){ prevMouse={x:t.clientX,y:t.clientY}; }
+    else {
       let player=0;
       if(!playerAssign[0]){ player=1; playerAssign[0]=true; }
       else if(!playerAssign[1]){ player=2; playerAssign[1]=true; }
@@ -433,8 +568,7 @@ canvas.addEventListener('touchmove',e=>{
     } else {
       const info=activeTouches[t.identifier];
       if(info){
-        // Añadir al trail del jugador
-        const trail = info.player===1 ? trail1 : trail2;
+        const trail=info.player===1?trail1:trail2;
         trail.push({x:t.clientX,y:t.clientY});
         if(trail.length>10) trail.shift();
         doSlice(info.prevX,info.prevY,t.clientX,t.clientY,info.player);
@@ -451,8 +585,7 @@ canvas.addEventListener('touchend',e=>{
     else {
       const info=activeTouches[t.identifier];
       if(info){
-        if(info.player===1) trail1=[];
-        else trail2=[];
+        if(info.player===1) trail1=[]; else trail2=[];
         playerAssign[info.player-1]=false;
         delete activeTouches[t.identifier];
       }
@@ -465,7 +598,6 @@ document.getElementById('gameover').addEventListener('click',()=>{ if(gameOver) 
 document.getElementById('gameover').addEventListener('touchend',e=>{ e.preventDefault(); if(gameOver) resetToMenu(); });
 document.addEventListener('keydown',e=>{ if(e.code==='Space'&&gameOver) resetToMenu(); });
 
-// === DRAW TRAIL ===
 function drawTrail(trail, color) {
   if(trail.length<2) return;
   ctx.beginPath();
@@ -499,13 +631,13 @@ function loop(){
   halves=halves.filter(h=>h.update()); halves.forEach(h=>h.draw());
   particles=particles.filter(p=>p.update()); particles.forEach(p=>p.draw());
   stains=stains.filter(s=>s.update()); stains.forEach(s=>s.draw());
+  comboTexts=comboTexts.filter(c=>c.update()); comboTexts.forEach(c=>c.draw());
 
-  // Trails
   if(gameMode===1){
-    drawTrail(trail1P, 'rgba(255,255,255,0.6)');
+    drawTrail(trail1P,'rgba(255,255,255,0.6)');
   } else {
-    drawTrail(trail1, 'rgba(79,195,247,0.8)');  // Azul P1
-    drawTrail(trail2, 'rgba(255,138,101,0.8)'); // Naranja P2
+    drawTrail(trail1,'rgba(79,195,247,0.8)');
+    drawTrail(trail2,'rgba(255,138,101,0.8)');
   }
 
   ctx.restore();
