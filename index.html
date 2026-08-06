@@ -139,8 +139,8 @@ const IMG_HEIGHT = 150;
 const MIN_SWIPE = 15;
 const MAX_HITS = 3;
 const BLOOD_COLORS = ['#880000', '#ff0000', '#cc0000'];
-const COMBO_COLORS = ['#ffffff', '#ffdd00', '#ff6600'];
-const COMBO_TEXTS = ['¡COMBO!', '¡DOBLE COMBO!', '¡TRIPLE COMBO!'];
+const COMBO_COLORS = ['#ffffff', '#ffdd00'];
+const COMBO_TEXTS = ['¡COMBO!', '¡DOBLE COMBO!'];
 
 // 2P
 let score1 = 0, score2 = 0;
@@ -281,7 +281,6 @@ class ComboText {
   }
   update() {
     this.life--;
-    // Animación de escala: crece rápido y luego se mantiene
     if (this.scale < 1) this.scale += 0.15;
     if (this.scale > 1) this.scale = 1;
     return this.life > 0;
@@ -312,14 +311,12 @@ class TransversalPiece {
     this.x = x; this.y = y;
     this.face = face;
     this.size = size;
-    // Dirección horizontal: sale hacia arriba o abajo
     this.vx = (Math.random() - 0.5) * 3;
     this.vy = dirUp ? -(3 + Math.random() * 3) : (2 + Math.random() * 2);
     this.rot = 0;
     this.rs = (Math.random() - 0.5) * 0.15;
     this.life = 45;
-    // Región del corte: qué franja horizontal representa
-    this.sliceIndex = sliceIndex; // 0=top, 1=mid, 2=bottom
+    this.sliceIndex = sliceIndex;
     this.totalSlices = MAX_HITS + 1;
   }
   update() {
@@ -355,7 +352,7 @@ class TransversalPiece {
   }
 }
 
-// === CABEZA CON CORTES MÚLTIPLES ===
+// === CABEZA ===
 class Head {
   constructor() {
     this.x = Math.random() * (canvas.width - 100) + 50;
@@ -465,21 +462,23 @@ function doSlice(x1,y1,x2,y2,player){
       else if(player===2){ score2+=10; }
       updateUI();
 
-      // Trozos transversales (salen 2 por golpe)
+      // Trozos transversales
       const sliceIdx=h.hits-1;
       halves.push(new TransversalPiece(h.x,h.y,h.face,h.size,true,sliceIdx));
       halves.push(new TransversalPiece(h.x,h.y,h.face,h.size,false,sliceIdx));
 
-      // Partículas direccionales
+      // Partículas
       for(let j=0;j<10;j++) particles.push(new Particle(h.x,h.y,dirX,dirY));
 
       // Manchas
       for(let j=0;j<3;j++) stains.push(new Stain(h.x+(Math.random()-.5)*60, h.y+(Math.random()-.5)*60));
 
-      // Texto combo
-      const comboIdx=h.hits-1;
-      if(comboIdx<COMBO_TEXTS.length){
-        comboTexts.push(new ComboText(h.x,h.y-40,COMBO_TEXTS[comboIdx],COMBO_COLORS[comboIdx]));
+      // Combo text: SOLO a partir del 2º corte
+      if(h.hits >= 2) {
+        const comboIdx = h.hits - 2; // 0 para hit 2, 1 para hit 3
+        if(comboIdx < COMBO_TEXTS.length){
+          comboTexts.push(new ComboText(h.x, h.y - 40, COMBO_TEXTS[comboIdx], COMBO_COLORS[comboIdx]));
+        }
       }
 
       if(destroyed){
@@ -489,7 +488,7 @@ function doSlice(x1,y1,x2,y2,player){
         else if(player===1){ score1+=20; }
         else if(player===2){ score2+=20; }
         updateUI();
-        // Explosión final de trozos
+        // Explosión final
         for(let j=0;j<MAX_HITS+1;j++){
           halves.push(new TransversalPiece(h.x,h.y,h.face,h.size,(Math.random()>.5),j));
         }
