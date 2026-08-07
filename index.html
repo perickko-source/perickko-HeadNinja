@@ -146,7 +146,7 @@ const COMBO_TEXTS = ['¡COMBO!', '¡DOBLE COMBO!', '¡TRIPLE COMBO!'];
 let recentCuts = [];
 const COMBO_WINDOW = 600;
 
-// together:true = todas las cabezas salen a la vez
+// together:true = salen a la vez, posiciones y alturas distintas
 const ROUND_CONFIG = [
   { heads: 1, bombs: 0, aligned: false, together: false, pause: true },  // 1
   { heads: 2, bombs: 0, aligned: false, together: true,  pause: true },  // 2
@@ -154,8 +154,8 @@ const ROUND_CONFIG = [
   { heads: 4, bombs: 0, aligned: false, together: true,  pause: true },  // 4
   { heads: 0, bombs: 1, aligned: false, together: false, pause: true },  // 5
   { heads: 4, bombs: 0, aligned: true,  together: false, pause: false }, // 6
-  { heads: 5, bombs: 1, aligned: false, together: false, pause: false }, // 7
-  { heads: 6, bombs: 0, aligned: false, together: false, pause: false }, // 8
+  { heads: 5, bombs: 1, aligned: false, together: true,  pause: false }, // 7
+  { heads: 6, bombs: 0, aligned: false, together: true,  pause: false }, // 8
   { heads: 7, bombs: 0, aligned: false, together: true,  pause: true },  // 9
   { heads: 0, bombs: 1, aligned: false, together: false, pause: true },  // 10
   { heads: 8, bombs: 0, aligned: false, together: true,  pause: false }, // 11
@@ -303,9 +303,15 @@ function setupRound() {
   }
 }
 
+// Salen a la vez, pero desde posiciones X distintas y a distintas alturas (Y)
 function spawnTogetherHeads(count) {
   for (let i = 0; i < count; i++) {
-    heads.push(new Head()); // cada una con posición/trayectoria propia, pero salen a la vez
+    const h = new Head();
+    // Altura de aparición distinta (zona baja de la pantalla)
+    const startY = canvas.height * (0.6 + Math.random() * 0.5);
+    h.y = startY;
+    h.vy = calcVyFrom(startY, 50);
+    heads.push(h);
   }
 }
 
@@ -382,6 +388,16 @@ function calcVy(minY) {
   const targetY = Math.max(minY, canvas.height * (0.1 + Math.random() * 0.3));
   let dist = (canvas.height + 40) - targetY;
   const maxDist = ((canvas.height + 40) - minY) / (speedMultiplier * speedMultiplier);
+  dist = Math.min(dist, maxDist);
+  return -Math.sqrt(2 * GRAVITY * dist) * speedMultiplier;
+}
+
+// Velocidad para alcanzar un pico por encima de la mitad, saliendo desde startY
+function calcVyFrom(startY, minY) {
+  const targetY = Math.max(minY, canvas.height * (0.1 + Math.random() * 0.3));
+  let dist = startY - targetY;
+  if (dist < 0) dist = 0;
+  const maxDist = (startY - minY) / (speedMultiplier * speedMultiplier);
   dist = Math.min(dist, maxDist);
   return -Math.sqrt(2 * GRAVITY * dist) * speedMultiplier;
 }
@@ -859,7 +875,6 @@ function loop(){
       if(roundPause === 0) setupRound();
     } else if(roundActive) {
       const config = getRoundConfig(currentRound);
-      // Spawn secuencial solo si NO son together ni aligned
       if(!config.aligned && !config.together && headsSpawned < headsInRound){
         spawnTimer++;
         const interval = Math.max(40, 80 - currentRound * 2);
