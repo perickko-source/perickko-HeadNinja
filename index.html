@@ -130,7 +130,7 @@ const ctx = canvas.getContext('2d');
 
 let gameStarted = false;
 let gameMode = 1;
-let heads = [], particles = [], halves = [], stains = [], comboTexts = [], bombs = [];
+let heads = [], particles = [], halves = [], stains = [], comboTexts = [], bombs = [], smokes = [];
 let score = 0, lives = 3, gameOver = false, spawnTimer = 0, difficulty = 1;
 let shakeTimer = 0, shakeIntensity = 0;
 const GRAVITY = 0.22;
@@ -181,7 +181,7 @@ let trail1 = [], trail2 = [], trail1P = [];
 const bombImg = new Image();
 bombImg.src = 'bomba.png';
 
-// === SISTEMA DE SONIDO (múltiples efectos) ===
+// === SONIDO ===
 let audioCtx = null;
 const buffers = { slice: null, mecha: null, explosion: null };
 const fallbacks = {};
@@ -193,62 +193,41 @@ function initAudio() {
     loadBuffer('mecha', 'mecha.ogg', ['mecha.mp3']);
     loadBuffer('explosion', 'explosion.ogg', ['explosion.mp3']);
   } catch(e) {}
-  // Fallbacks HTML5
   makeFallback('slice', 'chaf.ogg', 'chaf.mp3');
   makeFallback('mecha', 'mecha.ogg', 'mecha.mp3');
   makeFallback('explosion', 'explosion.ogg', 'explosion.mp3');
 }
-
 function makeFallback(key, ogg, mp3) {
   const a = new Audio(ogg);
-  a.addEventListener('error', () => {
-    fallbacks[key] = new Audio(mp3);
-    fallbacks[key].load();
-  });
+  a.addEventListener('error', () => { fallbacks[key] = new Audio(mp3); fallbacks[key].load(); });
   a.load();
   fallbacks[key] = a;
 }
-
 function loadBuffer(key, url, alternates) {
-  fetch(url)
-    .then(r => { if (!r.ok) throw new Error(); return r.arrayBuffer(); })
+  fetch(url).then(r => { if (!r.ok) throw new Error(); return r.arrayBuffer(); })
     .then(d => new Promise((res, rej) => { audioCtx.decodeAudioData(d, res, rej); }))
     .then(b => { buffers[key] = b; })
-    .catch(() => {
-      if (alternates && alternates.length) {
-        loadBuffer(key, alternates[0], alternates.slice(1));
-      }
-    });
+    .catch(() => { if (alternates && alternates.length) loadBuffer(key, alternates[0], alternates.slice(1)); });
 }
-
 function playSound(key) {
   if (audioCtx && buffers[key]) {
-    if (audioCtx.state === 'suspended') {
-      audioCtx.resume().then(() => playWeb(key));
-    } else {
-      playWeb(key);
-    }
+    if (audioCtx.state === 'suspended') audioCtx.resume().then(() => playWeb(key));
+    else playWeb(key);
     return;
   }
   playFallback(key);
 }
-
 function playWeb(key) {
   try {
     const s = audioCtx.createBufferSource();
-    s.buffer = buffers[key];
-    s.connect(audioCtx.destination);
-    s.start(0);
+    s.buffer = buffers[key]; s.connect(audioCtx.destination); s.start(0);
   } catch(e) { playFallback(key); }
 }
-
 function playFallback(key) {
   const f = fallbacks[key];
   if (!f) return;
   try { f.cloneNode().play().catch(() => {}); } catch(e) {}
 }
-
-// Atajos
 function playSlice() { playSound('slice'); }
 function playMecha() { playSound('mecha'); }
 function playExplosion() { playSound('explosion'); }
@@ -277,7 +256,7 @@ function startGame(mode) {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
   gameStarted = true; gameOver = false;
-  heads = []; particles = []; halves = []; stains = []; comboTexts = []; bombs = [];
+  heads = []; particles = []; halves = []; stains = []; comboTexts = []; bombs = []; smokes = [];
   trail1 = []; trail2 = []; trail1P = []; recentCuts = [];
   score = 0; lives = 3; difficulty = 1; spawnTimer = 0;
   score1 = 0; score2 = 0; timeLeft = 60;
@@ -444,6 +423,36 @@ class ComboText {
   }
 }
 
+// === HUMO DE LA MECHA ===
+class SmokeParticle {
+  constructor(x, y) {
+    this.x = x; this.y = y;
+    this.vx = (Math.random() - 0.5) * 0.6;
+    this.vy = -0.6 - Math.random() * 0.9;
+    this.r = 3 + Math.random() * 4;
+    this.grow = 0.15 + Math.random() * 0.2;
+    this.life = 40 + Math.random() * 20;
+    this.maxLife = this.life;
+    this.tone = 120 + Math.floor(Math.random() * 80); // gris variable
+  }
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.r += this.grow;
+    this.vx += (Math.random() - 0.5) * 0.06;
+    return --this.life > 0;
+  }
+  draw() {
+    const t = this.life / this.maxLife;
+    ctx.globalAlpha = t * 0.35;
+    ctx.fillStyle = 'rgb(' + this.tone + ',' + this.tone + ',' + this.tone + ')';
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+}
+
 class Stain {
   constructor(x, y) {
     this.x = x; this.y = y;
@@ -557,19 +566,39 @@ class Bomb {
     this.rot = 0; this.rs = (Math.random() - 0.5) * 0.1;
     this.size = BOMB_SIZE;
     this.exploding = false; this.explodeTimer = 0;
-    playMecha(); // sonido al aparecer
+    this.smokeTimer = 0;
+    playMecha();
+  }
+  // Posición de la punta de la mecha (teniendo en cuenta rotación)
+  fuseTip() {
+    const ox = -this.size * 0.15;
+    const oy = -this.size * 0.42;
+    const cos = Math.cos(this.rot), sin = Math.sin(this.rot);
+    return {
+      x: this.x + ox * cos - oy * sin,
+      y: this.y + ox * sin + oy * cos
+    };
   }
   update() {
     if (this.exploding) { this.explodeTimer--; return this.explodeTimer > 0; }
     this.x += this.vx; this.y += this.vy;
     this.vy += GRAVITY; this.rot += this.rs;
+
+    // Emitir humo por la mecha
+    this.smokeTimer--;
+    if (this.smokeTimer <= 0) {
+      this.smokeTimer = 3;
+      const tip = this.fuseTip();
+      smokes.push(new SmokeParticle(tip.x, tip.y));
+    }
+
     if (this.y > canvas.height + 60 && this.vy > 0) return false;
     return true;
   }
   explode() {
     this.exploding = true; this.explodeTimer = 20;
     shakeTimer = 15; shakeIntensity = 8;
-    playExplosion(); // sonido al explotar
+    playExplosion();
     for (let j = 0; j < 25; j++) {
       const angle = (Math.PI * 2 / 25) * j;
       const speed = 3 + Math.random() * 5;
@@ -864,6 +893,7 @@ function loop(){
   heads.forEach(h=>h.draw());
   halves=halves.filter(h=>h.update()); halves.forEach(h=>h.draw());
   bombs=bombs.filter(b=>b.update()); bombs.forEach(b=>b.draw());
+  smokes=smokes.filter(s=>s.update()); smokes.forEach(s=>s.draw());
   particles=particles.filter(p=>p.update()); particles.forEach(p=>p.draw());
   stains=stains.filter(s=>s.update()); stains.forEach(s=>s.draw());
   comboTexts=comboTexts.filter(c=>c.update()); comboTexts.forEach(c=>c.draw());
