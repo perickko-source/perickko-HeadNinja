@@ -146,19 +146,20 @@ const COMBO_TEXTS = ['¡COMBO!', '¡DOBLE COMBO!', '¡TRIPLE COMBO!'];
 let recentCuts = [];
 const COMBO_WINDOW = 600;
 
+// together:true = todas las cabezas salen a la vez
 const ROUND_CONFIG = [
-  { heads: 1, bombs: 0, aligned: false, pause: true },
-  { heads: 2, bombs: 0, aligned: false, pause: true },
-  { heads: 3, bombs: 0, aligned: false, pause: false },
-  { heads: 4, bombs: 0, aligned: false, pause: true },
-  { heads: 0, bombs: 1, aligned: false, pause: true },
-  { heads: 4, bombs: 0, aligned: true,  pause: false },
-  { heads: 5, bombs: 1, aligned: false, pause: false },
-  { heads: 6, bombs: 0, aligned: false, pause: false },
-  { heads: 7, bombs: 0, aligned: false, pause: true },
-  { heads: 0, bombs: 1, aligned: false, pause: true },
-  { heads: 8, bombs: 0, aligned: false, pause: false },
-  { heads: 0, bombs: 1, aligned: false, pause: true },
+  { heads: 1, bombs: 0, aligned: false, together: false, pause: true },  // 1
+  { heads: 2, bombs: 0, aligned: false, together: true,  pause: true },  // 2
+  { heads: 3, bombs: 0, aligned: false, together: true,  pause: false }, // 3
+  { heads: 4, bombs: 0, aligned: false, together: true,  pause: true },  // 4
+  { heads: 0, bombs: 1, aligned: false, together: false, pause: true },  // 5
+  { heads: 4, bombs: 0, aligned: true,  together: false, pause: false }, // 6
+  { heads: 5, bombs: 1, aligned: false, together: false, pause: false }, // 7
+  { heads: 6, bombs: 0, aligned: false, together: false, pause: false }, // 8
+  { heads: 7, bombs: 0, aligned: false, together: true,  pause: true },  // 9
+  { heads: 0, bombs: 1, aligned: false, together: false, pause: true },  // 10
+  { heads: 8, bombs: 0, aligned: false, together: true,  pause: false }, // 11
+  { heads: 0, bombs: 1, aligned: false, together: false, pause: true },  // 12
 ];
 
 let currentRound = 1;
@@ -181,11 +182,9 @@ let trail1 = [], trail2 = [], trail1P = [];
 const bombImg = new Image();
 bombImg.src = 'bomba.png';
 
-// === SONIDO ===
 let audioCtx = null;
 const buffers = { slice: null, mecha: null, explosion: null };
 const fallbacks = {};
-
 function initAudio() {
   try {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -292,9 +291,21 @@ function setupRound() {
   spawnTimer = 0; roundActive = true;
   const cycle = Math.floor((currentRound - 1) / 12);
   speedMultiplier = 0.7 + cycle * 0.15;
-  if (config.aligned && headsInRound > 0) {
-    spawnAlignedHeads(headsInRound);
-    headsSpawned = headsInRound;
+
+  if (headsInRound > 0) {
+    if (config.aligned) {
+      spawnAlignedHeads(headsInRound);
+      headsSpawned = headsInRound;
+    } else if (config.together) {
+      spawnTogetherHeads(headsInRound);
+      headsSpawned = headsInRound;
+    }
+  }
+}
+
+function spawnTogetherHeads(count) {
+  for (let i = 0; i < count; i++) {
+    heads.push(new Head()); // cada una con posición/trayectoria propia, pero salen a la vez
   }
 }
 
@@ -423,7 +434,6 @@ class ComboText {
   }
 }
 
-// === HUMO DE LA MECHA ===
 class SmokeParticle {
   constructor(x, y) {
     this.x = x; this.y = y;
@@ -433,11 +443,10 @@ class SmokeParticle {
     this.grow = 0.15 + Math.random() * 0.2;
     this.life = 40 + Math.random() * 20;
     this.maxLife = this.life;
-    this.tone = 120 + Math.floor(Math.random() * 80); // gris variable
+    this.tone = 120 + Math.floor(Math.random() * 80);
   }
   update() {
-    this.x += this.vx;
-    this.y += this.vy;
+    this.x += this.vx; this.y += this.vy;
     this.r += this.grow;
     this.vx += (Math.random() - 0.5) * 0.06;
     return --this.life > 0;
@@ -458,7 +467,6 @@ class Stain {
     this.x = x; this.y = y;
     this.life = 110; this.maxLife = 110;
     this.layers = []; this.splats = []; this.drips = [];
-
     const numLayers = 2 + Math.floor(Math.random() * 2);
     for (let l = 0; l < numLayers; l++) {
       const color = STAIN_COLORS[Math.floor(Math.random() * STAIN_COLORS.length)];
@@ -471,7 +479,6 @@ class Stain {
         pts.push({ angle: (Math.PI * 2 / n) * i, r: baseR * (0.5 + Math.random() * 0.8) });
       }
       this.layers.push({ color, ox, oy, pts });
-
       const numDrips = 1 + Math.floor(Math.random() * 3);
       for (let d = 0; d < numDrips; d++) {
         this.drips.push({
@@ -484,7 +491,6 @@ class Stain {
         });
       }
     }
-
     const numSplats = 8 + Math.floor(Math.random() * 10);
     for (let i = 0; i < numSplats; i++) {
       this.splats.push({
@@ -498,9 +504,7 @@ class Stain {
   update() {
     this.life--;
     const fadeStart = this.maxLife * 0.55;
-    if (this.life < fadeStart) {
-      for (const d of this.drips) d.len += d.speed;
-    }
+    if (this.life < fadeStart) for (const d of this.drips) d.len += d.speed;
     return this.life > 0;
   }
   drawBlob(pts) {
@@ -520,11 +524,9 @@ class Stain {
     const fadeStart = this.maxLife * 0.55;
     let alpha = 0.85;
     if (this.life < fadeStart) alpha = 0.85 * (this.life / fadeStart);
-
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.globalAlpha = alpha;
-
     for (const layer of this.layers) {
       ctx.save();
       ctx.translate(layer.ox, layer.oy);
@@ -532,14 +534,12 @@ class Stain {
       this.drawBlob(layer.pts);
       ctx.restore();
     }
-
     for (const s of this.splats) {
       ctx.fillStyle = s.color;
       ctx.beginPath();
       ctx.arc(s.ox, s.oy, s.r, 0, Math.PI * 2);
       ctx.fill();
     }
-
     for (const d of this.drips) {
       if (d.len <= 0) continue;
       ctx.strokeStyle = d.color;
@@ -550,7 +550,6 @@ class Stain {
       ctx.lineTo(d.ox, d.oy + d.len);
       ctx.stroke();
     }
-
     ctx.restore();
     ctx.globalAlpha = 1;
   }
@@ -569,29 +568,22 @@ class Bomb {
     this.smokeTimer = 0;
     playMecha();
   }
-  // Posición de la punta de la mecha (teniendo en cuenta rotación)
   fuseTip() {
     const ox = -this.size * 0.15;
     const oy = -this.size * 0.42;
     const cos = Math.cos(this.rot), sin = Math.sin(this.rot);
-    return {
-      x: this.x + ox * cos - oy * sin,
-      y: this.y + ox * sin + oy * cos
-    };
+    return { x: this.x + ox * cos - oy * sin, y: this.y + ox * sin + oy * cos };
   }
   update() {
     if (this.exploding) { this.explodeTimer--; return this.explodeTimer > 0; }
     this.x += this.vx; this.y += this.vy;
     this.vy += GRAVITY; this.rot += this.rs;
-
-    // Emitir humo por la mecha
     this.smokeTimer--;
     if (this.smokeTimer <= 0) {
       this.smokeTimer = 3;
       const tip = this.fuseTip();
       smokes.push(new SmokeParticle(tip.x, tip.y));
     }
-
     if (this.y > canvas.height + 60 && this.vy > 0) return false;
     return true;
   }
@@ -867,7 +859,8 @@ function loop(){
       if(roundPause === 0) setupRound();
     } else if(roundActive) {
       const config = getRoundConfig(currentRound);
-      if(!config.aligned && headsSpawned < headsInRound){
+      // Spawn secuencial solo si NO son together ni aligned
+      if(!config.aligned && !config.together && headsSpawned < headsInRound){
         spawnTimer++;
         const interval = Math.max(40, 80 - currentRound * 2);
         if(spawnTimer >= interval){ spawnTimer = 0; heads.push(new Head()); headsSpawned++; }
