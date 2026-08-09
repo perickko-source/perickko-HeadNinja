@@ -150,34 +150,33 @@ const COMBO_COLORS = ['#ffffff', '#ffdd00', '#ff6600'];
 const COMBO_TEXTS = ['¡COMBO!', '¡DOBLE COMBO!', '¡TRIPLE COMBO!'];
 const SWOOSH_COOLDOWN = 400;
 
-// Guion de la ronda 21: H=cabeza, B=bomba
 const SCRIPT_SEQ = 'HHBHHHBBHHBHBHHHHBHBHHHHBBBBHHH';
 
 let recentCuts = [];
-const COMBO_WINDOW = 600;
+const COMBO_WINDOW = 900; // ms para encadenar combos
 
 const ROUND_CONFIG = [
-  { heads: 1,  bombs: 0, aligned: false, spawn: 'seq',     spread: false, pause: true  }, // 1
-  { heads: 2,  bombs: 0, aligned: false, spawn: 'together',spread: false, pause: true  }, // 2
-  { heads: 3,  bombs: 0, aligned: false, spawn: 'together',spread: false, pause: false }, // 3
-  { heads: 4,  bombs: 0, aligned: false, spawn: 'near',    spread: false, pause: true  }, // 4
-  { heads: 0,  bombs: 1, aligned: false, spawn: 'seq',     spread: false, pause: true  }, // 5
-  { heads: 0,  bombs: 2, aligned: false, spawn: 'seq',     spread: false, pause: true  }, // 6
-  { heads: 4,  bombs: 0, aligned: true,  spawn: 'seq',     spread: false, pause: false }, // 7
-  { heads: 5,  bombs: 1, aligned: false, spawn: 'near',    spread: false, pause: false }, // 8
-  { heads: 4,  bombs: 1, aligned: false, spawn: 'near',    spread: false, pause: true  }, // 9
-  { heads: 0,  bombs: 2, aligned: false, spawn: 'seq',     spread: false, pause: true  }, // 10
-  { heads: 5,  bombs: 1, aligned: false, spawn: 'near',    spread: false, pause: true  }, // 11
-  { heads: 6,  bombs: 0, aligned: false, spawn: 'near',    spread: false, pause: false }, // 12
-  { heads: 7,  bombs: 0, aligned: false, spawn: 'near',    spread: false, pause: true  }, // 13
-  { heads: 0,  bombs: 1, aligned: false, spawn: 'seq',     spread: false, pause: true  }, // 14
-  { heads: 6,  bombs: 1, aligned: false, spawn: 'near',    spread: false, pause: true  }, // 15
-  { heads: 3,  bombs: 1, aligned: false, spawn: 'near',    spread: false, pause: true  }, // 16
-  { heads: 3,  bombs: 0, aligned: false, spawn: 'near',    spread: false, pause: true  }, // 17
-  { heads: 8,  bombs: 0, aligned: false, spawn: 'near',    spread: true,  pause: false }, // 18
-  { heads: 0,  bombs: 1, aligned: false, spawn: 'seq',     spread: false, pause: true  }, // 19
-  { heads: 10, bombs: 0, aligned: false, spawn: 'attack',  spread: false, pause: true  }, // 20 ⚔️ (deja pausa de descanso)
-  { heads: 0,  bombs: 0, aligned: false, spawn: 'script',  spread: false, pause: true  }, // 21 📜 guion
+  { heads: 1,  bombs: 0, aligned: false, spawn: 'seq',     spread: false, pause: true  },
+  { heads: 2,  bombs: 0, aligned: false, spawn: 'together',spread: false, pause: true  },
+  { heads: 3,  bombs: 0, aligned: false, spawn: 'together',spread: false, pause: false },
+  { heads: 4,  bombs: 0, aligned: false, spawn: 'near',    spread: false, pause: true  },
+  { heads: 0,  bombs: 1, aligned: false, spawn: 'seq',     spread: false, pause: true  },
+  { heads: 0,  bombs: 2, aligned: false, spawn: 'seq',     spread: false, pause: true  },
+  { heads: 4,  bombs: 0, aligned: true,  spawn: 'seq',     spread: false, pause: false },
+  { heads: 5,  bombs: 1, aligned: false, spawn: 'near',    spread: false, pause: false },
+  { heads: 4,  bombs: 1, aligned: false, spawn: 'near',    spread: false, pause: true  },
+  { heads: 0,  bombs: 2, aligned: false, spawn: 'seq',     spread: false, pause: true  },
+  { heads: 5,  bombs: 1, aligned: false, spawn: 'near',    spread: false, pause: true  },
+  { heads: 6,  bombs: 0, aligned: false, spawn: 'near',    spread: false, pause: false },
+  { heads: 7,  bombs: 0, aligned: false, spawn: 'near',    spread: false, pause: true  },
+  { heads: 0,  bombs: 1, aligned: false, spawn: 'seq',     spread: false, pause: true  },
+  { heads: 6,  bombs: 1, aligned: false, spawn: 'near',    spread: false, pause: true  },
+  { heads: 3,  bombs: 1, aligned: false, spawn: 'near',    spread: false, pause: true  },
+  { heads: 3,  bombs: 0, aligned: false, spawn: 'near',    spread: false, pause: true  },
+  { heads: 8,  bombs: 0, aligned: false, spawn: 'near',    spread: true,  pause: false },
+  { heads: 0,  bombs: 1, aligned: false, spawn: 'seq',     spread: false, pause: true  },
+  { heads: 10, bombs: 0, aligned: false, spawn: 'attack',  spread: false, pause: true  },
+  { heads: 0,  bombs: 0, aligned: false, spawn: 'script',  spread: false, pause: true  },
 ];
 const CYCLE = ROUND_CONFIG.length;
 
@@ -495,22 +494,20 @@ function calcVyFrom(startY, minY) {
   return -Math.sqrt(2 * GRAVITY * dist) * speedMultiplier;
 }
 
+// COMBO: los cortes se acumulan en la ventana y el texto escala (2=COMBO,3=DOBLE,4=TRIPLE)
 function registerCut(x, y, player) {
   const now = Date.now();
   recentCuts.push({ time: now, x, y, player });
   recentCuts = recentCuts.filter(c => now - c.time < COMBO_WINDOW);
-  const playerCuts = recentCuts.filter(c => c.player === player);
-  const count = playerCuts.length;
+  const count = recentCuts.filter(c => c.player === player).length;
   if (count >= 2) {
     const comboIdx = Math.min(count - 2, COMBO_TEXTS.length - 1);
-    const lastCut = playerCuts[playerCuts.length - 1];
-    comboTexts.push(new ComboText(lastCut.x, lastCut.y - 40, COMBO_TEXTS[comboIdx], COMBO_COLORS[comboIdx]));
-    const bonus = count * 5;
+    comboTexts.push(new ComboText(x, y - 40, COMBO_TEXTS[comboIdx], COMBO_COLORS[comboIdx]));
+    const bonus = (comboIdx + 1) * 5;
     if (gameMode === 1) score += bonus;
     else if (player === 1) score1 += bonus;
     else if (player === 2) score2 += bonus;
     updateUI();
-    recentCuts = recentCuts.filter(c => c.player !== player);
   }
 }
 
