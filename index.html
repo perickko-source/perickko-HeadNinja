@@ -131,6 +131,10 @@ const ctx = canvas.getContext('2d');
 let gameStarted = false;
 let gameMode = 1;
 let heads = [], particles = [], halves = [], stains = [], comboTexts = [], bombs = [], smokes = [];
+let pendingHeads = [];
+let attackQueue = 0;
+let attackSide = 'L';
+let scriptQueue = [];
 let score = 0, lives = 3, gameOver = false, spawnTimer = 0, difficulty = 1;
 let shakeTimer = 0, shakeIntensity = 0;
 const GRAVITY = 0.22;
@@ -138,29 +142,44 @@ const HEAD_SIZE = 80;
 const IMG_HEIGHT = 150;
 const BOMB_SIZE = 150;
 const MIN_SWIPE = 15;
+const NEAR_INTERVAL = 12;
+const ATTACK_INTERVAL = 20;
 const BLOOD_COLORS = ['#880000', '#ff0000', '#cc0000'];
 const STAIN_COLORS = ['#d90429', '#a4161a', '#f25c54', '#ef8a8a', '#cc0000', '#880000'];
 const COMBO_COLORS = ['#ffffff', '#ffdd00', '#ff6600'];
 const COMBO_TEXTS = ['¡COMBO!', '¡DOBLE COMBO!', '¡TRIPLE COMBO!'];
+const SWOOSH_COOLDOWN = 400;
+
+// Guion de la ronda 21: H=cabeza, B=bomba
+const SCRIPT_SEQ = 'HHBHHHBBHHBHBHHHHBHBHHHHBBBBHHH';
 
 let recentCuts = [];
 const COMBO_WINDOW = 600;
 
-// together:true = salen a la vez, posiciones y alturas distintas
 const ROUND_CONFIG = [
-  { heads: 1, bombs: 0, aligned: false, together: false, pause: true },  // 1
-  { heads: 2, bombs: 0, aligned: false, together: true,  pause: true },  // 2
-  { heads: 3, bombs: 0, aligned: false, together: true,  pause: false }, // 3
-  { heads: 4, bombs: 0, aligned: false, together: true,  pause: true },  // 4
-  { heads: 0, bombs: 1, aligned: false, together: false, pause: true },  // 5
-  { heads: 4, bombs: 0, aligned: true,  together: false, pause: false }, // 6
-  { heads: 5, bombs: 1, aligned: false, together: true,  pause: false }, // 7
-  { heads: 6, bombs: 0, aligned: false, together: true,  pause: false }, // 8
-  { heads: 7, bombs: 0, aligned: false, together: true,  pause: true },  // 9
-  { heads: 0, bombs: 1, aligned: false, together: false, pause: true },  // 10
-  { heads: 8, bombs: 0, aligned: false, together: true,  pause: false }, // 11
-  { heads: 0, bombs: 1, aligned: false, together: false, pause: true },  // 12
+  { heads: 1,  bombs: 0, aligned: false, spawn: 'seq',     spread: false, pause: true  }, // 1
+  { heads: 2,  bombs: 0, aligned: false, spawn: 'together',spread: false, pause: true  }, // 2
+  { heads: 3,  bombs: 0, aligned: false, spawn: 'together',spread: false, pause: false }, // 3
+  { heads: 4,  bombs: 0, aligned: false, spawn: 'near',    spread: false, pause: true  }, // 4
+  { heads: 0,  bombs: 1, aligned: false, spawn: 'seq',     spread: false, pause: true  }, // 5
+  { heads: 0,  bombs: 2, aligned: false, spawn: 'seq',     spread: false, pause: true  }, // 6
+  { heads: 4,  bombs: 0, aligned: true,  spawn: 'seq',     spread: false, pause: false }, // 7
+  { heads: 5,  bombs: 1, aligned: false, spawn: 'near',    spread: false, pause: false }, // 8
+  { heads: 4,  bombs: 1, aligned: false, spawn: 'near',    spread: false, pause: true  }, // 9
+  { heads: 0,  bombs: 2, aligned: false, spawn: 'seq',     spread: false, pause: true  }, // 10
+  { heads: 5,  bombs: 1, aligned: false, spawn: 'near',    spread: false, pause: true  }, // 11
+  { heads: 6,  bombs: 0, aligned: false, spawn: 'near',    spread: false, pause: false }, // 12
+  { heads: 7,  bombs: 0, aligned: false, spawn: 'near',    spread: false, pause: true  }, // 13
+  { heads: 0,  bombs: 1, aligned: false, spawn: 'seq',     spread: false, pause: true  }, // 14
+  { heads: 6,  bombs: 1, aligned: false, spawn: 'near',    spread: false, pause: true  }, // 15
+  { heads: 3,  bombs: 1, aligned: false, spawn: 'near',    spread: false, pause: true  }, // 16
+  { heads: 3,  bombs: 0, aligned: false, spawn: 'near',    spread: false, pause: true  }, // 17
+  { heads: 8,  bombs: 0, aligned: false, spawn: 'near',    spread: true,  pause: false }, // 18
+  { heads: 0,  bombs: 1, aligned: false, spawn: 'seq',     spread: false, pause: true  }, // 19
+  { heads: 10, bombs: 0, aligned: false, spawn: 'attack',  spread: false, pause: true  }, // 20 ⚔️ (deja pausa de descanso)
+  { heads: 0,  bombs: 0, aligned: false, spawn: 'script',  spread: false, pause: true  }, // 21 📜 guion
 ];
+const CYCLE = ROUND_CONFIG.length;
 
 let currentRound = 1;
 let headsInRound = 0;
@@ -183,7 +202,7 @@ const bombImg = new Image();
 bombImg.src = 'bomba.png';
 
 let audioCtx = null;
-const buffers = { slice: null, mecha: null, explosion: null };
+const buffers = { slice: null, mecha: null, explosion: null, launch: null, swoosh: null };
 const fallbacks = {};
 function initAudio() {
   try {
@@ -191,10 +210,14 @@ function initAudio() {
     loadBuffer('slice', 'chaf.ogg', ['chaf.mp3']);
     loadBuffer('mecha', 'mecha.ogg', ['mecha.mp3']);
     loadBuffer('explosion', 'explosion.ogg', ['explosion.mp3']);
+    loadBuffer('launch', 'lanzamiento.ogg', ['lanzamiento.mp3']);
+    loadBuffer('swoosh', 'sable.ogg', ['sable.mp3']);
   } catch(e) {}
   makeFallback('slice', 'chaf.ogg', 'chaf.mp3');
   makeFallback('mecha', 'mecha.ogg', 'mecha.mp3');
   makeFallback('explosion', 'explosion.ogg', 'explosion.mp3');
+  makeFallback('launch', 'lanzamiento.ogg', 'lanzamiento.mp3');
+  makeFallback('swoosh', 'sable.ogg', 'sable.mp3');
 }
 function makeFallback(key, ogg, mp3) {
   const a = new Audio(ogg);
@@ -208,28 +231,43 @@ function loadBuffer(key, url, alternates) {
     .then(b => { buffers[key] = b; })
     .catch(() => { if (alternates && alternates.length) loadBuffer(key, alternates[0], alternates.slice(1)); });
 }
-function playSound(key) {
+function playSound(key, vol, delay) {
+  vol = vol === undefined ? 1 : vol;
+  delay = delay || 0;
   if (audioCtx && buffers[key]) {
-    if (audioCtx.state === 'suspended') audioCtx.resume().then(() => playWeb(key));
-    else playWeb(key);
+    const doPlay = () => {
+      try {
+        const s = audioCtx.createBufferSource();
+        s.buffer = buffers[key];
+        const g = audioCtx.createGain();
+        g.gain.value = vol;
+        s.connect(g); g.connect(audioCtx.destination);
+        s.start(audioCtx.currentTime + delay);
+      } catch(e) { playFallback(key, vol); }
+    };
+    if (audioCtx.state === 'suspended') audioCtx.resume().then(doPlay);
+    else doPlay();
     return;
   }
-  playFallback(key);
+  playFallback(key, vol);
 }
-function playWeb(key) {
-  try {
-    const s = audioCtx.createBufferSource();
-    s.buffer = buffers[key]; s.connect(audioCtx.destination); s.start(0);
-  } catch(e) { playFallback(key); }
-}
-function playFallback(key) {
+function playFallback(key, vol) {
   const f = fallbacks[key];
   if (!f) return;
-  try { f.cloneNode().play().catch(() => {}); } catch(e) {}
+  try { const c = f.cloneNode(); c.volume = (vol === undefined ? 1 : vol); c.play().catch(() => {}); } catch(e) {}
 }
 function playSlice() { playSound('slice'); }
 function playMecha() { playSound('mecha'); }
 function playExplosion() { playSound('explosion'); }
+function playLaunch() { playSound('launch', 0.6, Math.random() * 0.12); }
+
+let lastSwoosh = 0;
+function playSwoosh() {
+  const now = performance.now();
+  if (now - lastSwoosh < SWOOSH_COOLDOWN) return;
+  lastSwoosh = now;
+  playSound('swoosh', 0.5);
+}
 
 function lockLandscape() {
   if (screen.orientation && screen.orientation.lock)
@@ -256,6 +294,7 @@ function startGame(mode) {
   canvas.height = window.innerHeight;
   gameStarted = true; gameOver = false;
   heads = []; particles = []; halves = []; stains = []; comboTexts = []; bombs = []; smokes = [];
+  pendingHeads = []; attackQueue = 0; scriptQueue = [];
   trail1 = []; trail2 = []; trail1P = []; recentCuts = [];
   score = 0; lives = 3; difficulty = 1; spawnTimer = 0;
   score1 = 0; score2 = 0; timeLeft = 60;
@@ -281,7 +320,7 @@ function startGame(mode) {
   loop();
 }
 
-function getRoundConfig(round) { return ROUND_CONFIG[((round - 1) % 12)]; }
+function getRoundConfig(round) { return ROUND_CONFIG[((round - 1) % CYCLE)]; }
 
 function setupRound() {
   const config = getRoundConfig(currentRound);
@@ -289,25 +328,80 @@ function setupRound() {
   bombsInRound = config.bombs;
   headsSpawned = 0; headsCleared = 0; bombsSpawned = 0;
   spawnTimer = 0; roundActive = true;
-  const cycle = Math.floor((currentRound - 1) / 12);
+  pendingHeads = []; attackQueue = 0; scriptQueue = [];
+  const cycle = Math.floor((currentRound - 1) / CYCLE);
   speedMultiplier = 0.7 + cycle * 0.15;
 
-  if (headsInRound > 0) {
+  if (config.spawn === 'script') {
+    scriptQueue = SCRIPT_SEQ.split('');
+    headsInRound = scriptQueue.filter(c => c === 'H').length;
+    bombsInRound = scriptQueue.filter(c => c === 'B').length;
+  } else if (headsInRound > 0) {
     if (config.aligned) {
       spawnAlignedHeads(headsInRound);
       headsSpawned = headsInRound;
-    } else if (config.together) {
+    } else if (config.spawn === 'together') {
       spawnTogetherHeads(headsInRound);
       headsSpawned = headsInRound;
+    } else if (config.spawn === 'near') {
+      buildNearSlots(headsInRound, config.spread);
+    } else if (config.spawn === 'attack') {
+      attackQueue = headsInRound;
+      attackSide = 'L';
+    }
+    if (bombsInRound > 0) {
+      bombs.push(new Bomb());
+      bombsSpawned = 1;
     }
   }
 }
 
-// Salen a la vez, pero desde posiciones X distintas y a distintas alturas (Y)
+function buildNearSlots(count, spread) {
+  pendingHeads = [];
+  let xs = [];
+  if (spread) {
+    const margin = canvas.width * 0.1;
+    const spacing = (canvas.width - margin * 2) / (count - 1);
+    for (let i = 0; i < count; i++) xs.push(margin + i * spacing);
+    xs.sort(() => Math.random() - 0.5);
+  } else {
+    for (let i = 0; i < count; i++) xs.push(Math.random() * (canvas.width * 0.7) + canvas.width * 0.15);
+  }
+  for (let i = 0; i < count; i++) {
+    pendingHeads.push({ x: xs[i], startY: canvas.height * (0.6 + Math.random() * 0.5) });
+  }
+}
+
+function releaseHead(slot) {
+  const h = new Head();
+  const centerX = canvas.width / 2;
+  h.x = slot.x;
+  h.vx = (centerX - slot.x) * 0.012 + (Math.random() - 0.5) * 1.5;
+  h.y = slot.startY;
+  h.vy = calcVyFrom(slot.startY, 50);
+  heads.push(h);
+}
+
+function releaseAttackHead() {
+  const h = new Head();
+  const fromLeft = (attackSide === 'L');
+  attackSide = fromLeft ? 'R' : 'L';
+  const seg = canvas.width / 6;
+  if (fromLeft) {
+    h.x = seg * (1 + Math.random());
+    h.vx = 1.5 + Math.random() * 1.5;
+  } else {
+    h.x = seg * (4 + Math.random());
+    h.vx = -(1.5 + Math.random() * 1.5);
+  }
+  h.y = canvas.height + 40;
+  h.vy = calcVy(50);
+  heads.push(h);
+}
+
 function spawnTogetherHeads(count) {
   for (let i = 0; i < count; i++) {
     const h = new Head();
-    // Altura de aparición distinta (zona baja de la pantalla)
     const startY = canvas.height * (0.6 + Math.random() * 0.5);
     h.y = startY;
     h.vy = calcVyFrom(startY, 50);
@@ -359,7 +453,8 @@ window.addEventListener('orientationchange', () => {
 const FACES = [];
 const IMAGES = [];
 const imgSrcs = [
-  'manuel1.png','manuel2.png','revestido1.png','revestido2.png',
+  'manuel1.png','manuel2.png','manuel3.png','manuel4.png',
+  'revestido1.png','revestido2.png',
   'jordi1.png','jordi2.png','jordi3.png',
   'lopez1.png','lopez2.png','lopez3.png',
   'garcia1.png','garcia2.png','garcia3.png','garcia4.png',
@@ -391,8 +486,6 @@ function calcVy(minY) {
   dist = Math.min(dist, maxDist);
   return -Math.sqrt(2 * GRAVITY * dist) * speedMultiplier;
 }
-
-// Velocidad para alcanzar un pico por encima de la mitad, saliendo desde startY
 function calcVyFrom(startY, minY) {
   const targetY = Math.max(minY, canvas.height * (0.1 + Math.random() * 0.3));
   let dist = startY - targetY;
@@ -670,6 +763,7 @@ class Head {
     this.face = randomFace();
     this.size = this.face.type === 'image' ? IMG_HEIGHT : HEAD_SIZE;
     this.rot = 0; this.rs = (Math.random() - 0.5) * 0.08;
+    playLaunch();
   }
   update(){
     this.x += this.vx; this.y += this.vy;
@@ -788,7 +882,11 @@ canvas.addEventListener('mousemove',e=>{
   if(gameMode!==1||!mouseDown||gameOver||!gameStarted) return;
   const curr={x:e.clientX,y:e.clientY};
   trail1P.push(curr); if(trail1P.length>8) trail1P.shift();
-  if(prevMouse) doSlice(prevMouse.x,prevMouse.y,curr.x,curr.y,0);
+  if(prevMouse){
+    const d=Math.hypot(curr.x-prevMouse.x, curr.y-prevMouse.y);
+    if(d>6) playSwoosh();
+    doSlice(prevMouse.x,prevMouse.y,curr.x,curr.y,0);
+  }
   prevMouse=curr;
 });
 
@@ -813,7 +911,11 @@ canvas.addEventListener('touchmove',e=>{
     if(gameMode===1){
       const curr={x:t.clientX,y:t.clientY};
       trail1P.push(curr); if(trail1P.length>8) trail1P.shift();
-      if(prevMouse) doSlice(prevMouse.x,prevMouse.y,curr.x,curr.y,0);
+      if(prevMouse){
+        const d=Math.hypot(curr.x-prevMouse.x, curr.y-prevMouse.y);
+        if(d>6) playSwoosh();
+        doSlice(prevMouse.x,prevMouse.y,curr.x,curr.y,0);
+      }
       prevMouse=curr;
     } else {
       const info=activeTouches[t.identifier];
@@ -821,6 +923,8 @@ canvas.addEventListener('touchmove',e=>{
         const trail=info.player===1?trail1:trail2;
         trail.push({x:t.clientX,y:t.clientY});
         if(trail.length>10) trail.shift();
+        const d=Math.hypot(t.clientX-info.prevX, t.clientY-info.prevY);
+        if(d>6) playSwoosh();
         doSlice(info.prevX,info.prevY,t.clientX,t.clientY,info.player);
         info.prevX=t.clientX; info.prevY=t.clientY;
       }
@@ -875,15 +979,32 @@ function loop(){
       if(roundPause === 0) setupRound();
     } else if(roundActive) {
       const config = getRoundConfig(currentRound);
-      if(!config.aligned && !config.together && headsSpawned < headsInRound){
+
+      if(attackQueue > 0){
+        spawnTimer++;
+        if(spawnTimer >= ATTACK_INTERVAL){ spawnTimer = 0; releaseAttackHead(); attackQueue--; headsSpawned++; }
+      } else if(scriptQueue.length > 0){
+        spawnTimer++;
+        if(spawnTimer >= ATTACK_INTERVAL){
+          spawnTimer = 0;
+          const item = scriptQueue.shift();
+          if(item === 'H'){ releaseAttackHead(); headsSpawned++; }
+          else { bombs.push(new Bomb()); bombsSpawned++; }
+        }
+      } else if(pendingHeads.length>0){
+        spawnTimer++;
+        if(spawnTimer>=NEAR_INTERVAL){ spawnTimer=0; releaseHead(pendingHeads.shift()); headsSpawned++; }
+      } else if(config.spawn==='seq' && !config.aligned && headsSpawned<headsInRound){
         spawnTimer++;
         const interval = Math.max(40, 80 - currentRound * 2);
         if(spawnTimer >= interval){ spawnTimer = 0; heads.push(new Head()); headsSpawned++; }
       }
-      if(bombsSpawned < bombsInRound && heads.length === 0 && headsSpawned >= headsInRound){
+
+      if(bombsInRound>0 && headsInRound===0 && bombsSpawned<bombsInRound && bombs.filter(b=>!b.exploding).length===0){
         bombs.push(new Bomb()); bombsSpawned++;
       }
-      if(headsSpawned >= headsInRound && heads.length === 0 && bombsSpawned >= bombsInRound && bombs.filter(b=>!b.exploding).length === 0){
+
+      if(headsSpawned >= headsInRound && pendingHeads.length === 0 && attackQueue === 0 && scriptQueue.length === 0 && heads.length === 0 && bombsSpawned >= bombsInRound && bombs.filter(b=>!b.exploding).length === 0){
         roundActive = false;
         nextRound();
       }
