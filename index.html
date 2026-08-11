@@ -398,11 +398,21 @@ function releaseAttackHead() {
   heads.push(h);
 }
 
+// Together: columnas separadas al nacer (sin solape inicial), alturas distintas
 function spawnTogetherHeads(count) {
+  const margin = canvas.width * 0.12;
+  const spacing = (canvas.width - margin * 2) / (count - 1);
+  let xs = [];
+  for (let i = 0; i < count; i++) xs.push(margin + i * spacing);
+  xs.sort(() => Math.random() - 0.5);
+
+  const centerX = canvas.width / 2;
   for (let i = 0; i < count; i++) {
     const h = new Head();
+    h.x = xs[i];
     const startY = canvas.height * (0.6 + Math.random() * 0.5);
     h.y = startY;
+    h.vx = (centerX - h.x) * 0.012 + (Math.random() - 0.5) * 1.5;
     h.vy = calcVyFrom(startY, 50);
     heads.push(h);
   }
