@@ -153,7 +153,7 @@ const SWOOSH_COOLDOWN = 400;
 const SCRIPT_SEQ = 'HHBHHHBBHHBHBHHHHBHBHHHHBBBBHHH';
 
 let recentCuts = [];
-const COMBO_WINDOW = 900; // ms para encadenar combos
+const COMBO_WINDOW = 900;
 
 const ROUND_CONFIG = [
   { heads: 1,  bombs: 0, aligned: false, spawn: 'seq',     spread: false, pause: true  },
@@ -453,6 +453,7 @@ const FACES = [];
 const IMAGES = [];
 const imgSrcs = [
   'manuel1.png','manuel2.png','manuel3.png','manuel4.png',
+  'manuelean1.png','manuelean2.png','manuelean3.png',
   'revestido1.png','revestido2.png',
   'jordi1.png','jordi2.png','jordi3.png',
   'lopez1.png','lopez2.png','lopez3.png',
@@ -494,7 +495,6 @@ function calcVyFrom(startY, minY) {
   return -Math.sqrt(2 * GRAVITY * dist) * speedMultiplier;
 }
 
-// COMBO: los cortes se acumulan en la ventana y el texto escala (2=COMBO,3=DOBLE,4=TRIPLE)
 function registerCut(x, y, player) {
   const now = Date.now();
   recentCuts.push({ time: now, x, y, player });
@@ -571,7 +571,7 @@ class SmokeParticle {
 class Stain {
   constructor(x, y) {
     this.x = x; this.y = y;
-    this.life = 110; this.maxLife = 110;
+    this.life = 75; this.maxLife = 75;
     this.layers = []; this.splats = []; this.drips = [];
     const numLayers = 2 + Math.floor(Math.random() * 2);
     for (let l = 0; l < numLayers; l++) {
