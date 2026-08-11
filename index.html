@@ -112,7 +112,7 @@
 
 <div id="ui">
   <div>💀 <span id="score">0</span></div>
-  <div>❤️ <span id="lives">3</span></div>
+  <div>❤️ <span id="lives">5</span></div>
 </div>
 
 <div id="ui2p">
@@ -135,7 +135,7 @@ let pendingHeads = [];
 let attackQueue = 0;
 let attackSide = 'L';
 let scriptQueue = [];
-let score = 0, lives = 3, gameOver = false, spawnTimer = 0, difficulty = 1;
+let score = 0, lives = 5, gameOver = false, spawnTimer = 0, difficulty = 1;
 let shakeTimer = 0, shakeIntensity = 0;
 const GRAVITY = 0.22;
 const HEAD_SIZE = 80;
@@ -295,7 +295,7 @@ function startGame(mode) {
   heads = []; particles = []; halves = []; stains = []; comboTexts = []; bombs = []; smokes = [];
   pendingHeads = []; attackQueue = 0; scriptQueue = [];
   trail1 = []; trail2 = []; trail1P = []; recentCuts = [];
-  score = 0; lives = 3; difficulty = 1; spawnTimer = 0;
+  score = 0; lives = 5; difficulty = 1; spawnTimer = 0;
   score1 = 0; score2 = 0; timeLeft = 60;
   activeTouches = {}; playerAssign = [false, false]; prevMouse = null;
   currentRound = 1; speedMultiplier = 0.7;
@@ -355,17 +355,30 @@ function setupRound() {
   }
 }
 
+function pickX() {
+  const sep = 150;
+  const base = () => Math.random() * (canvas.width * 0.7) + canvas.width * 0.15;
+  for (let t = 0; t < 12; t++) {
+    const x = base();
+    let ok = true;
+    for (const h of heads) {
+      if (h.y > canvas.height * 0.45 && Math.abs(h.x - x) < sep) { ok = false; break; }
+    }
+    if (ok) return x;
+  }
+  return base();
+}
+
 function buildNearSlots(count, spread) {
   pendingHeads = [];
+  const margin = canvas.width * 0.1;
+  const spacing = (canvas.width - margin * 2) / (count - 1);
   let xs = [];
-  if (spread) {
-    const margin = canvas.width * 0.1;
-    const spacing = (canvas.width - margin * 2) / (count - 1);
-    for (let i = 0; i < count; i++) xs.push(margin + i * spacing);
-    xs.sort(() => Math.random() - 0.5);
-  } else {
-    for (let i = 0; i < count; i++) xs.push(Math.random() * (canvas.width * 0.7) + canvas.width * 0.15);
+  for (let i = 0; i < count; i++) {
+    const center = margin + i * spacing;
+    xs.push(spread ? center : center + (Math.random() - 0.5) * spacing * 0.4);
   }
+  xs.sort(() => Math.random() - 0.5);
   for (let i = 0; i < count; i++) {
     pendingHeads.push({ x: xs[i], startY: canvas.height * (0.6 + Math.random() * 0.5) });
   }
@@ -398,7 +411,6 @@ function releaseAttackHead() {
   heads.push(h);
 }
 
-// Together: columnas separadas al nacer (sin solape inicial), alturas distintas
 function spawnTogetherHeads(count) {
   const margin = canvas.width * 0.12;
   const spacing = (canvas.width - margin * 2) / (count - 1);
@@ -762,7 +774,7 @@ class Particle {
 
 class Head {
   constructor(){
-    this.x = Math.random() * (canvas.width * 0.7) + canvas.width * 0.15;
+    this.x = pickX();
     this.y = canvas.height + 40;
     const centerX = canvas.width / 2;
     this.vx = (centerX - this.x) * 0.012 + (Math.random() - 0.5) * 1.5;
