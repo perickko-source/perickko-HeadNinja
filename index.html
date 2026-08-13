@@ -38,10 +38,31 @@
   }
   #gameover span { font-size: 20px; color: #fff; display: block; margin-top: 15px; }
   #gameover .winner { font-size: 28px; color: #ffd700; margin-top: 10px; }
+
+  #fsScreen {
+    position: fixed; inset: 0; display: none;
+    flex-direction: column; justify-content: center; align-items: center;
+    background: #000; z-index: 85; cursor: pointer;
+  }
+  .fsPrompt {
+    color: #fff; font-family: 'Arial Black', sans-serif; font-size: 22px;
+    letter-spacing: 2px; text-align: center; text-shadow: 2px 2px 6px #000;
+    animation: pulse 1.2s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.45} }
+
+  #coverScreen { position: fixed; inset: 0; display: none; z-index: 90; cursor: pointer; background:#000; }
+  #coverScreen img { width: 100%; height: 100%; object-fit: cover; }
+  #loadWrap { position: absolute; left: 50%; bottom: 6%; transform: translateX(-50%); width: min(70%,420px); text-align: center; }
+  #loadBar { height: 14px; border: 2px solid #fff; border-radius: 8px; background: rgba(0,0,0,.45); overflow: hidden; }
+  #loadFill { height: 100%; width: 0%; background: linear-gradient(90deg,#ffdd00,#ff6600); border-radius: 6px; }
+  #loadText { margin-top: 8px; color: #fff; font-family: 'Arial Black', sans-serif; font-size: 14px; letter-spacing: 3px; text-shadow: 1px 1px 3px #000; }
+
   #startScreen {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     background: #1a1a2e;
-    display: flex; flex-direction: column;
+    display: none;
+    flex-direction: column;
     justify-content: center; align-items: center;
     z-index: 100;
   }
@@ -87,7 +108,7 @@
 
   @media screen and (orientation: portrait) {
     #rotateScreen { display: flex; }
-    #startScreen, canvas, #ui, #ui2p, #gameover { display: none !important; }
+    #startScreen, canvas, #ui, #ui2p, #gameover, #coverScreen, #fsScreen { display: none !important; }
   }
   @media screen and (orientation: landscape) {
     #rotateScreen { display: none; }
@@ -101,6 +122,18 @@
   <div>GIRA EL DISPOSITIVO</div>
   <div style="font-size:16px; margin-top:10px; font-weight:normal;">
     Este juego se juega en horizontal
+  </div>
+</div>
+
+<div id="fsScreen">
+  <div class="fsPrompt">👆 TOCA PARA<br>PANTALLA COMPLETA</div>
+</div>
+
+<div id="coverScreen">
+  <img src="portada.png" alt="portada">
+  <div id="loadWrap">
+    <div id="loadBar"><div id="loadFill"></div></div>
+    <div id="loadText">CARGANDO</div>
   </div>
 </div>
 
@@ -149,6 +182,7 @@ const STAIN_COLORS = ['#d90429', '#a4161a', '#f25c54', '#ef8a8a', '#cc0000', '#8
 const COMBO_COLORS = ['#ffffff', '#ffdd00', '#ff6600'];
 const COMBO_TEXTS = ['¡COMBO!', '¡DOBLE COMBO!', '¡TRIPLE COMBO!'];
 const SWOOSH_COOLDOWN = 400;
+const LOAD_MS = 6000;
 
 const SCRIPT_SEQ = 'HHBHHHBBHHBHBHHHHBHBHHHHBBBBHHH';
 
@@ -196,6 +230,12 @@ let timerInterval = null;
 let activeTouches = {};
 let playerAssign = [false, false];
 let trail1 = [], trail2 = [], trail1P = [];
+
+let fsActivated = false;
+let coverDismissed = false;
+let loadingActive = false;
+let loadStart = 0;
+let rafId = 0;
 
 const bombImg = new Image();
 bombImg.src = 'bomba.png';
@@ -279,6 +319,59 @@ function goFullscreen(cb) {
   else cb();
 }
 
+function startLoading() {
+  if (loadingActive) return;
+  loadingActive = true;
+  loadStart = performance.now();
+  const fill = document.getElementById('loadFill');
+  const txt = document.getElementById('loadText');
+  txt.textContent = 'CARGANDO';
+  function tick(now) {
+    if (!loadingActive) return;
+    const p = Math.min(1, (now - loadStart) / LOAD_MS);
+    fill.style.width = (p * 100) + '%';
+    if (p >= 1) {
+      loadingActive = false;
+      txt.textContent = '¡LISTO!';
+      setTimeout(() => { coverDismissed = true; refreshScreens(); }, 400);
+      return;
+    }
+    rafId = requestAnimationFrame(tick);
+  }
+  rafId = requestAnimationFrame(tick);
+}
+function stopLoading() { loadingActive = false; cancelAnimationFrame(rafId); }
+
+function refreshScreens() {
+  const landscape = window.innerWidth > window.innerHeight;
+  const fs = document.getElementById('fsScreen');
+  const cover = document.getElementById('coverScreen');
+  const start = document.getElementById('startScreen');
+  if (!gameStarted && landscape) {
+    if (!fsActivated) {
+      fs.style.display = 'flex'; cover.style.display = 'none'; start.style.display = 'none';
+    } else if (!coverDismissed) {
+      fs.style.display = 'none'; cover.style.display = 'block'; start.style.display = 'none';
+    } else {
+      fs.style.display = 'none'; cover.style.display = 'none'; start.style.display = 'flex';
+    }
+  } else {
+    fs.style.display = 'none'; cover.style.display = 'none'; stopLoading();
+    if (!gameStarted) start.style.display = 'flex';
+  }
+}
+
+document.getElementById('fsScreen').addEventListener('click', () => {
+  fsActivated = true;
+  goFullscreen(() => { lockLandscape(); });
+  refreshScreens();
+  startLoading();
+});
+
+document.getElementById('coverScreen').addEventListener('click', () => {
+  if (loadingActive) loadStart = performance.now() - LOAD_MS; // tocar = saltar carga
+});
+
 document.getElementById('btn1p').addEventListener('click', () => {
   initAudio(); goFullscreen(() => { lockLandscape(); startGame(1); });
 });
@@ -289,6 +382,8 @@ document.getElementById('btn2p').addEventListener('click', () => {
 function startGame(mode) {
   gameMode = mode;
   document.getElementById('startScreen').style.display = 'none';
+  document.getElementById('coverScreen').style.display = 'none';
+  document.getElementById('fsScreen').style.display = 'none';
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
   gameStarted = true; gameOver = false;
@@ -466,9 +561,9 @@ function endGame2P() {
   document.getElementById('gameover').style.display = 'block';
 }
 
-window.addEventListener('resize', () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; });
+window.addEventListener('resize', () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; refreshScreens(); });
 window.addEventListener('orientationchange', () => {
-  setTimeout(() => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }, 300);
+  setTimeout(() => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; refreshScreens(); }, 300);
 });
 
 const FACES = [];
@@ -888,6 +983,8 @@ function resetToMenu(){
   document.getElementById('gameover').style.display='none';
   document.getElementById('ui').style.display='none';
   document.getElementById('ui2p').style.display='none';
+  document.getElementById('coverScreen').style.display='none';
+  document.getElementById('fsScreen').style.display='none';
   document.getElementById('startScreen').style.display='flex';
 }
 
@@ -1057,6 +1154,7 @@ function loop(){
   requestAnimationFrame(loop);
 }
 
+refreshScreens();
 updateUI();
 </script>
 </body>
