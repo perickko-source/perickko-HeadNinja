@@ -51,8 +51,12 @@
   }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.45} }
 
-  #coverScreen { position: fixed; inset: 0; display: none; z-index: 90; cursor: pointer; background:#000; }
-  #coverScreen img { width: 100%; height: 100%; object-fit: cover; }
+  #coverScreen { position: fixed; inset: 0; display: none; z-index: 90; cursor: pointer; background:#000; overflow:hidden; }
+  /* Altura encaja en pantalla; ancho mantiene proporción y se recorta por los lados si sobra */
+  #coverScreen img {
+    position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    height: 100%; width: auto; max-width: none;
+  }
   #loadWrap { position: absolute; left: 50%; bottom: 6%; transform: translateX(-50%); width: min(70%,420px); text-align: center; }
   #loadBar { height: 14px; border: 2px solid #fff; border-radius: 8px; background: rgba(0,0,0,.45); overflow: hidden; }
   #loadFill { height: 100%; width: 0%; background: linear-gradient(90deg,#ffdd00,#ff6600); border-radius: 6px; }
@@ -369,7 +373,7 @@ document.getElementById('fsScreen').addEventListener('click', () => {
 });
 
 document.getElementById('coverScreen').addEventListener('click', () => {
-  if (loadingActive) loadStart = performance.now() - LOAD_MS; // tocar = saltar carga
+  if (loadingActive) loadStart = performance.now() - LOAD_MS;
 });
 
 document.getElementById('btn1p').addEventListener('click', () => {
