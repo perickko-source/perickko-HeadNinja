@@ -52,7 +52,6 @@
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.45} }
 
   #coverScreen { position: fixed; inset: 0; display: none; z-index: 90; cursor: pointer; background:#000; overflow:hidden; }
-  /* Altura encaja en pantalla; ancho mantiene proporción y se recorta por los lados si sobra */
   #coverScreen img {
     position: absolute; top: 0; left: 50%; transform: translateX(-50%);
     height: 100%; width: auto; max-width: none;
@@ -213,7 +212,7 @@ const ROUND_CONFIG = [
   { heads: 3,  bombs: 0, aligned: false, spawn: 'near',    spread: false, pause: true  },
   { heads: 8,  bombs: 0, aligned: false, spawn: 'near',    spread: true,  pause: false },
   { heads: 0,  bombs: 1, aligned: false, spawn: 'seq',     spread: false, pause: true  },
-  { heads: 10, bombs: 0, aligned: false, spawn: 'attack',  spread: false, pause: true  },
+  { heads: 20, bombs: 0, aligned: false, spawn: 'attack',  spread: false, pause: true  }, // 20 cabezas, altura progresiva
   { heads: 0,  bombs: 0, aligned: false, spawn: 'script',  spread: false, pause: true  },
 ];
 const CYCLE = ROUND_CONFIG.length;
@@ -493,7 +492,8 @@ function releaseHead(slot) {
   heads.push(h);
 }
 
-function releaseAttackHead() {
+// progress 0..1 => la cabeza sube cada vez más alto (0.45h -> ~0.08h)
+function releaseAttackHead(progress) {
   const h = new Head();
   const fromLeft = (attackSide === 'L');
   attackSide = fromLeft ? 'R' : 'L';
@@ -506,7 +506,14 @@ function releaseAttackHead() {
     h.vx = -(1.5 + Math.random() * 1.5);
   }
   h.y = canvas.height + 40;
-  h.vy = calcVy(50);
+  if (progress === undefined) {
+    h.vy = calcVy(50);
+  } else {
+    const t = 0.45 - 0.37 * progress; // 0.45h (sobre el centro) -> 0.08h (casi arriba)
+    const targetY = Math.max(40, canvas.height * t);
+    const dist = (canvas.height + 40) - targetY;
+    h.vy = -Math.sqrt(2 * GRAVITY * dist);
+  }
   heads.push(h);
 }
 
@@ -575,6 +582,7 @@ const IMAGES = [];
 const imgSrcs = [
   'manuel1.png','manuel2.png','manuel3.png','manuel4.png',
   'manuelean1.png','manuelean2.png','manuelean3.png',
+  'javiera1.png','javiera2.png','javiera3.png','javiera4.png',
   'revestido1.png','revestido2.png',
   'jordi1.png','jordi2.png','jordi3.png',
   'lopez1.png','lopez2.png','lopez3.png',
@@ -1102,7 +1110,12 @@ function loop(){
 
       if(attackQueue > 0){
         spawnTimer++;
-        if(spawnTimer >= ATTACK_INTERVAL){ spawnTimer = 0; releaseAttackHead(); attackQueue--; headsSpawned++; }
+        if(spawnTimer >= ATTACK_INTERVAL){
+          spawnTimer = 0;
+          const progress = headsInRound > 1 ? (headsSpawned / (headsInRound - 1)) : 0;
+          releaseAttackHead(progress);
+          attackQueue--; headsSpawned++;
+        }
       } else if(scriptQueue.length > 0){
         spawnTimer++;
         if(spawnTimer >= ATTACK_INTERVAL){
